@@ -1,12 +1,5 @@
-// This is the original file written by andrewrk in his chat demo
-// on youtube
 const std = @import("std");
-const net = std.net;
-const fs = std.fs;
-const os = std.os;
-
-const zhp = @import("zhp");
-const web = zhp.web;
+const web = @import("zhp").web;
 
 pub const io_mode = .evented;
 
@@ -15,16 +8,41 @@ const MainHandler = struct {
 
     pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "text/plain");
-        try response.body.append("Hello, World!");
+        try response.stream.write("Hello, World!");
     }
 
 };
 
+const JsonHandler = struct {
+    handler: web.RequestHandler,
+
+    pub fn get(self: *JsonHandler, response: *web.HttpResponse) !void {
+        try response.headers.put("Content-Type", "application/json");
+        // TODO: dump object to json?
+        try response.stream.write("{\"message\": \"Hello, World!\"}");
+    }
+
+};
+
+const ErrorTestHandler = struct {
+    handler: web.RequestHandler,
+
+    pub fn get(self: *ErrorTestHandler, response: *web.HttpResponse) !void {
+        try response.stream.write("Do some work");
+        return error.Ooops;
+    }
+
+};
+
+
 pub fn main() anyerror!void {
-    //var buf: [10 * 1024 * 1024]u8 = undefined;
+    std.event.Loop.instance.?.beginOneEvent();
+
     var allocator = &std.heap.ArenaAllocator.init(std.heap.page_allocator).allocator;
     var routes = [_]web.Route{
         web.Route.create("home", "/", MainHandler),
+        web.Route.create("json", "/json/", JsonHandler),
+        web.Route.create("error", "/500/", ErrorTestHandler),
     };
     var app = web.Application.init(.{
         .allocator=allocator,

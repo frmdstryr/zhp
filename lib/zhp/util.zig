@@ -2,9 +2,34 @@ const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
-
+const File = std.fs.File;
+const io = std.io;
 const assert = std.debug.assert;
 
+
+pub const IOStream = struct {
+    pub const BufferedOutStream = io.BufferedOutStream(File.OutStream.Error);
+    pub const BufferedInStream = io.BufferedInStream(File.InStream.Error);
+
+    file: File,
+    _in_stream: File.InStream,
+    _out_stream: File.OutStream,
+    in: BufferedInStream = undefined,
+    out: BufferedOutStream = undefined,
+
+    pub fn init(file: File) IOStream {
+        return IOStream{
+            .file = file,
+            ._in_stream = file.inStream(),
+            ._out_stream = file.outStream(),
+        };
+    }
+
+    pub fn prepare(self: *IOStream) void {
+        self.in = BufferedInStream.init(&self._in_stream.stream);
+        self.out = BufferedOutStream.init(&self._out_stream.stream);
+    }
+};
 
 
 // A map of arrays

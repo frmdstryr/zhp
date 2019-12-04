@@ -1,4 +1,4 @@
-
+const std = @import("std");
 const web = @import("web.zig");
 const responses = @import("status.zig");
 
@@ -6,41 +6,36 @@ const responses = @import("status.zig");
 pub const ServerErrorHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn init(application: *web.Application, response: *web.HttpResponse) *web.RequestHandler {
-        var self = ServerErrorHandler{
-            .handler = web.RequestHandler{
-                .application = application,
-                .request = response.request,
-                .response = response,
-                .dispatch = ServerErrorHandler.dispatch,
-            }
-        };
-        return &self.handler;
-    }
+    pub fn dispatch(self: *ServerErrorHandler, response: *web.HttpResponse) anyerror!void {
+        response.status = responses.INTERNAL_SERVER_ERROR;
+        try response.body.replaceContents("");
 
-    pub fn dispatch(handler: *web.RequestHandler) anyerror!void {
-        handler.response.status = responses.INTERNAL_SERVER_ERROR;
+        if (@errorReturnTrace()) |trace| {
+            try response.stream.print("<h1>Server Error</h1>");
+            //std.debug.dumpStackTrace(trace.*);
+
+            try response.stream.print(
+                "<h3>Request</h3><pre>{}</pre>", response.request);
+            try response.stream.print("<h3>Error Trace</h3><pre>");
+            try std.debug.writeStackTrace(
+                trace.*,
+                &response.stream,
+                self.handler.application.allocator,
+                try std.debug.getSelfDebugInfo(),
+                false);
+            try response.stream.print("</pre>");
+        } else {
+            try response.body.append("<h1>Server Error</h1>");
+        }
     }
 
 };
 
 pub const NotFoundHandler = struct {
     handler: web.RequestHandler,
-
-    pub fn init(application: *web.Application, response: *web.HttpResponse) *web.RequestHandler {
-        var self = NotFoundHandler{
-            .handler = web.RequestHandler{
-                .application = application,
-                .request = response.request,
-                .response = response,
-                .dispatch = NotFoundHandler.dispatch,
-            }
-        };
-        return &self.handler;
-    }
-
-    pub fn dispatch(handler: *web.RequestHandler) anyerror!void {
-        handler.response.status = responses.NOT_FOUND;
+    pub fn dispatch(self: *NotFoundHandler, response: *web.HttpResponse) !void {
+        response.status = responses.NOT_FOUND;
+        try response.stream.write("<h1>Not Found</h1>");
     }
 
 };
