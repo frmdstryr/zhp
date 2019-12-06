@@ -38,14 +38,14 @@ const ErrorTestHandler = struct {
 pub fn main() anyerror!void {
     std.event.Loop.instance.?.beginOneEvent();
 
-    var allocator = &std.heap.ArenaAllocator.init(std.heap.page_allocator).allocator;
+    //var allocator = &std.heap.ArenaAllocator.init(std.heap.page_allocator).allocator;
     var routes = [_]web.Route{
         web.Route.create("home", "/", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
     };
     var app = web.Application.init(.{
-        .allocator=allocator,
+        //.allocator=allocator,
         .routes=routes[0..],
     });
     defer app.deinit();

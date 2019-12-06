@@ -29,6 +29,7 @@ pub const IOStream = struct {
         self.in = BufferedInStream.init(&self._in_stream.stream);
         self.out = BufferedOutStream.init(&self._out_stream.stream);
     }
+
 };
 
 
