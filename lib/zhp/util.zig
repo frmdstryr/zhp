@@ -229,10 +229,14 @@ pub const IOStream = struct {
 
     /// Reads 1 byte from the stream or returns `error.EndOfStream`.
     pub fn readByte(self: *Self) !u8 {
-        var result: [1]u8 = undefined;
-        const amt_read = try self.read(result[0..]);
-        if (amt_read < 1) return error.EndOfStream;
-        return result[0];
+        if (self._in_end_index == self._in_start_index) {
+            // Do a direct read into the input buffer
+            self._in_end_index = try self.read(self._in_buffer[0..buffer_size]);
+            self._in_start_index = 0;
+            if (self._in_end_index < 1) return error.EndOfStream;
+        }
+        self._in_start_index += 1;
+        return self._in_buffer[self._in_start_index];
     }
 
     /// Same as `readByte` except the returned byte is signed.

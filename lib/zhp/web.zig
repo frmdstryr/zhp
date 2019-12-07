@@ -43,9 +43,10 @@ pub const HttpRequest = struct {
             const path = it.next() orelse return error.MalformedHttpRequest;
             const version = it.next() orelse return error.MalformedHttpRequest;
             if (it.next() != null) return error.MalformedHttpRequest;
-            var pattern = try re.compile(allocator, "^HTTP/1\\.[0-9]$");
-            defer pattern.deinit();
-            if (!try re.match(&pattern, version)) {
+            //var pattern = try re.compile(allocator, "^HTTP/1\\.[0-9]$");
+            //defer pattern.deinit();
+            //if (!try re.match(&pattern, version)) {
+            if (!mem.eql(u8, version, "HTTP/1.1")) {
                 return error.UnsupportedHttpVersion;
             }
 
