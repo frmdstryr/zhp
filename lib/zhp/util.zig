@@ -3,35 +3,374 @@ const testing = std.testing;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const File = std.fs.File;
-const io = std.io;
+const math = std.math;
 const assert = std.debug.assert;
-
+const Buffer = std.Buffer;
 
 pub const IOStream = struct {
-    pub const BufferedOutStream = io.BufferedOutStream(File.OutStream.Error);
-    pub const BufferedInStream = io.BufferedInStream(File.InStream.Error);
+    pub const stack_size = 1 * 1024 * 1024;
+    pub const buffer_size = mem.page_size;
+    pub const WriteError = File.WriteError;
+    pub const ReadError = File.ReadError;
 
+    _in_buffer: [buffer_size]u8 = undefined,
+    _in_start_index: usize = buffer_size,
+    _in_end_index: usize = buffer_size,
+    _out_buffer: [buffer_size]u8 = undefined,
+    _out_index: usize = 0,
+
+
+    const Self = @This();
     file: File,
-    _in_stream: File.InStream,
-    _out_stream: File.OutStream,
-    in: BufferedInStream = undefined,
-    out: BufferedOutStream = undefined,
 
     pub fn init(file: File) IOStream {
         return IOStream{
             .file = file,
-            ._in_stream = file.inStream(),
-            ._out_stream = file.outStream(),
         };
     }
 
-    pub fn prepare(self: *IOStream) void {
-        self.in = BufferedInStream.init(&self._in_stream.stream);
-        self.out = BufferedOutStream.init(&self._out_stream.stream);
+    pub fn reinit(self: *Self, file: File) void {
+        self.file = file;
+        self._in_start_index = buffer_size;
+        self._in_end_index = buffer_size;
+        self._out_index = 0;
+    }
+
+    fn readFn(self: *Self, dest: []u8) !usize {
+        //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
+
+        // Hot path for one byte reads
+        if (dest.len == 1 and self._in_end_index > self._in_start_index) {
+            dest[0] = self._in_buffer[self._in_start_index];
+            self._in_start_index += 1;
+            return 1;
+        }
+
+        var dest_index: usize = 0;
+        while (true) {
+            const dest_space = dest.len - dest_index;
+            if (dest_space == 0) {
+                return dest_index;
+            }
+            const amt_buffered = self._in_end_index - self._in_start_index;
+            if (amt_buffered == 0) {
+                assert(self._in_end_index <= buffer_size);
+                // Make sure the last read actually gave us some data
+                if (self._in_end_index == 0) {
+                    // reading from the unbuffered stream returned nothing
+                    // so we have nothing left to read.
+                    return dest_index;
+                }
+                // we can read more data from the unbuffered stream
+                if (dest_space < buffer_size) {
+                    self._in_start_index = 0;
+                    self._in_end_index = try self.file.read(self._in_buffer[0..]);
+
+                    // Shortcut
+                    if (self._in_end_index >= dest_space) {
+                        mem.copy(u8, dest[dest_index..], self._in_buffer[0..dest_space]);
+                        self._in_start_index = dest_space;
+                        return dest.len;
+                    }
+                } else {
+                    // asking for so much data that buffering is actually less efficient.
+                    // forward the request directly to the unbuffered stream
+                    const amt_read = try self.file.read(dest[dest_index..]);
+                    return dest_index + amt_read;
+                }
+            }
+
+            const copy_amount = math.min(dest_space, amt_buffered);
+            const copy_end_index = self._in_start_index + copy_amount;
+            mem.copy(u8, dest[dest_index..], self._in_buffer[self._in_start_index..copy_end_index]);
+            self._in_start_index = copy_end_index;
+            dest_index += copy_amount;
+        }
+    }
+
+    pub fn read(self: *Self, buffer: []u8) !usize {
+        if (comptime std.io.is_async) {
+            var f = async self.readFn(buffer);
+            return await f;
+        } else {
+            return self.readFn(buffer);
+        }
+    }
+
+    /// Returns the number of bytes read. If the number read is smaller than buf.len, it
+    /// means the stream reached the end. Reaching the end of a stream is not an error
+    /// condition.
+    pub fn readFull(self: *Self, buffer: []u8) !usize {
+        var index: usize = 0;
+        while (index != buffer.len) {
+            const amt = try self.read(buffer[index..]);
+            if (amt == 0) return index;
+            index += amt;
+        }
+        return index;
+    }
+
+    /// Returns the number of bytes read. If the number read would be smaller than buf.len,
+    /// error.EndOfStream is returned instead.
+    pub fn readNoEof(self: *Self, buf: []u8) !void {
+        const amt_read = try self.readFull(buf);
+        if (amt_read < buf.len) return error.EndOfStream;
+    }
+
+    /// Replaces `buffer` contents by reading from the stream until it is finished.
+    /// If `buffer.len()` would exceed `max_size`, `error.StreamTooLong` is returned and
+    /// the contents read from the stream are lost.
+    pub fn readAllBuffer(self: *Self, buffer: *Buffer, max_size: usize) !void {
+        try buffer.resize(0);
+
+        var actual_buf_len: usize = 0;
+        while (true) {
+            const dest_slice = buffer.toSlice()[actual_buf_len..];
+            const bytes_read = try self.readFull(dest_slice);
+            actual_buf_len += bytes_read;
+
+            if (bytes_read != dest_slice.len) {
+                buffer.shrink(actual_buf_len);
+                return;
+            }
+
+            const new_buf_size = math.min(max_size, actual_buf_len + mem.page_size);
+            if (new_buf_size == actual_buf_len) return error.StreamTooLong;
+            try buffer.resize(new_buf_size);
+        }
+    }
+
+    /// Allocates enough memory to hold all the contents of the stream. If the allocated
+    /// memory would be greater than `max_size`, returns `error.StreamTooLong`.
+    /// Caller owns returned memory.
+    /// If this function returns an error, the contents from the stream read so far are lost.
+    pub fn readAllAlloc(self: *Self, allocator: *mem.Allocator, max_size: usize) ![]u8 {
+        var buf = Buffer.initNull(allocator);
+        defer buf.deinit();
+
+        try self.readAllBuffer(&buf, max_size);
+        return buf.toOwnedSlice();
+    }
+
+    /// Replaces `buffer` contents by reading from the stream until `delimiter` is found.
+    /// Does not include the delimiter in the result.
+    /// If `buffer.len()` would exceed `max_size`, `error.StreamTooLong` is returned and the contents
+    /// read from the stream so far are lost.
+    pub fn readUntilDelimiterBuffer(self: *Self, buffer: *Buffer, delimiter: u8, max_size: usize) !void {
+        try buffer.resize(0);
+
+        while (true) {
+            var byte: u8 = try self.readByte();
+
+            if (byte == delimiter) {
+                return;
+            }
+
+            if (buffer.len() == max_size) {
+                return error.StreamTooLong;
+            }
+
+            try buffer.appendByte(byte);
+        }
+    }
+
+    /// Allocates enough memory to read until `delimiter`. If the allocated
+    /// memory would be greater than `max_size`, returns `error.StreamTooLong`.
+    /// Caller owns returned memory.
+    /// If this function returns an error, the contents from the stream read so far are lost.
+    pub fn readUntilDelimiterAlloc(self: *Self, allocator: *mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
+        var buf = Buffer.initNull(allocator);
+        defer buf.deinit();
+
+        try self.readUntilDelimiterBuffer(&buf, delimiter, max_size);
+        return buf.toOwnedSlice();
+    }
+
+    /// Reads from the stream until specified byte is found. If the buffer is not
+    /// large enough to hold the entire contents, `error.StreamTooLong` is returned.
+    /// If end-of-stream is found, returns the rest of the stream. If this
+    /// function is called again after that, returns null.
+    /// Returns a slice of the stream data, with ptr equal to `buf.ptr`. The
+    /// delimiter byte is not included in the returned slice.
+    pub fn readUntilDelimiterOrEof(self: *Self, buf: []u8, delimiter: u8) !?[]u8 {
+        var index: usize = 0;
+        while (true) {
+            const byte = self.readByte() catch |err| switch (err) {
+                error.EndOfStream => {
+                    if (index == 0) {
+                        return null;
+                    } else {
+                        return buf[0..index];
+                    }
+                },
+                else => |e| return e,
+            };
+
+            if (byte == delimiter) return buf[0..index];
+            if (index >= buf.len) return error.StreamTooLong;
+
+            buf[index] = byte;
+            index += 1;
+        }
+    }
+
+    /// Reads from the stream until specified byte is found, discarding all data,
+    /// including the delimiter.
+    /// If end-of-stream is found, this function succeeds.
+    pub fn skipUntilDelimiterOrEof(self: *Self, delimiter: u8) !void {
+        while (true) {
+            const byte = self.readByte() catch |err| switch (err) {
+                error.EndOfStream => return,
+                else => |e| return e,
+            };
+            if (byte == delimiter) return;
+        }
+    }
+
+    /// Reads 1 byte from the stream or returns `error.EndOfStream`.
+    pub fn readByte(self: *Self) !u8 {
+        var result: [1]u8 = undefined;
+        const amt_read = try self.read(result[0..]);
+        if (amt_read < 1) return error.EndOfStream;
+        return result[0];
+    }
+
+    /// Same as `readByte` except the returned byte is signed.
+    pub fn readByteSigned(self: *Self) !i8 {
+        return @bitCast(i8, try self.readByte());
+    }
+
+    /// Reads a native-endian integer
+    pub fn readIntNative(self: *Self, comptime T: type) !T {
+        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
+        try self.readNoEof(bytes[0..]);
+        return mem.readIntNative(T, &bytes);
+    }
+
+    /// Reads a foreign-endian integer
+    pub fn readIntForeign(self: *Self, comptime T: type) !T {
+        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
+        try self.readNoEof(bytes[0..]);
+        return mem.readIntForeign(T, &bytes);
+    }
+
+    pub fn readIntLittle(self: *Self, comptime T: type) !T {
+        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
+        try self.readNoEof(bytes[0..]);
+        return mem.readIntLittle(T, &bytes);
+    }
+
+    pub fn readIntBig(self: *Self, comptime T: type) !T {
+        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
+        try self.readNoEof(bytes[0..]);
+        return mem.readIntBig(T, &bytes);
+    }
+
+    pub fn readInt(self: *Self, comptime T: type, endian: builtin.Endian) !T {
+        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
+        try self.readNoEof(bytes[0..]);
+        return mem.readInt(T, &bytes, endian);
+    }
+
+    pub fn readVarInt(self: *Self, comptime ReturnType: type, endian: builtin.Endian, size: usize) !ReturnType {
+        assert(size <= @sizeOf(ReturnType));
+        var bytes_buf: [@sizeOf(ReturnType)]u8 = undefined;
+        const bytes = bytes_buf[0..size];
+        try self.readNoEof(bytes);
+        return mem.readVarInt(ReturnType, bytes, endian);
+    }
+
+    pub fn skipBytes(self: *Self, num_bytes: u64) !void {
+        var i: u64 = 0;
+        while (i < num_bytes) : (i += 1) {
+            _ = try self.readByte();
+        }
+    }
+
+    pub fn readStruct(self: *Self, comptime T: type) !T {
+        // Only extern and packed structs have defined in-memory layout.
+        comptime assert(@typeInfo(T).Struct.layout != builtin.TypeInfo.ContainerLayout.Auto);
+        var res: [1]T = undefined;
+        try self.readNoEof(@sliceToBytes(res[0..]));
+        return res[0];
+    }
+
+    /// Reads an integer with the same size as the given enum's tag type. If the integer matches
+    /// an enum tag, casts the integer to the enum tag and returns it. Otherwise, returns an error.
+    /// TODO optimization taking advantage of most fields being in order
+    pub fn readEnum(self: *Self, comptime Enum: type, endian: builtin.Endian) !Enum {
+        const E = error{
+            /// An integer was read, but it did not match any of the tags in the supplied enum.
+            InvalidValue,
+        };
+        const type_info = @typeInfo(Enum).Enum;
+        const tag = try self.readInt(type_info.tag_type, endian);
+
+        inline for (std.meta.fields(Enum)) |field| {
+            if (tag == field.value) {
+                return @field(Enum, field.name);
+            }
+        }
+
+        return E.InvalidValue;
+    }
+
+
+    fn writeFn(self: *Self, bytes: []const u8) !void {
+        if (bytes.len == 1) {
+            self._out_buffer[self._out_index] = bytes[0];
+            self._out_index += 1;
+            if (self._out_index == buffer_size) {
+                try self.flush();
+            }
+            return;
+        } else if (bytes.len >= buffer_size) {
+            try self.flush();
+            return self.file.write(bytes);
+        }
+        var src_index: usize = 0;
+
+        while (src_index < bytes.len) {
+            const dest_space_left = buffer_size - self._out_index;
+            const copy_amt = math.min(dest_space_left, bytes.len - src_index);
+            mem.copy(u8, self._out_buffer[self._out_index..], bytes[src_index .. src_index + copy_amt]);
+            self._out_index += copy_amt;
+            assert(self._out_index <= buffer_size);
+            if (self._out_index == buffer_size) {
+                try self.flush();
+            }
+            src_index += copy_amt;
+        }
+    }
+
+    pub fn write(self: *Self, bytes: []const u8) !void {
+        if (comptime std.io.is_async) {
+            var f = async self.writeFn(bytes);
+            return await f;
+        } else {
+            return self.writeFn(bytes);
+        }
+    }
+
+    pub fn flush(self: *Self) !void {
+        try self.file.write(self._out_buffer[0..self._out_index]);
+        self._out_index = 0;
+    }
+
+    pub fn writeByte(self: *Self, byte: u8) !void {
+        const slice = @as(*const [1]u8, &byte)[0..];
+        return self.writeFn(self, slice);
+    }
+
+    pub fn print(self: *Self, comptime format: []const u8, args: ...) !void {
+        return std.fmt.format(self, WriteError, Self.writeFn, format, args);
+    }
+
+    pub fn close(self: *Self) void {
+        self.file.close();
     }
 
 };
-
 
 // A map of arrays
 pub fn StringArrayMap(comptime T: type) type {

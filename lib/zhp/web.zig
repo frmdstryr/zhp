@@ -166,20 +166,18 @@ pub const HttpServerConnection = struct {
     application: *Application,
     arena: ArenaAllocator,
     allocator: *Allocator = undefined,
-    file: fs.File,
     io: IOStream,
     address: net.Address,
     closed: bool = false,
 
     // Handles a connection
     pub fn startRequestLoop(self: *HttpServerConnection) !void {
-        server_conn.io.prepare(); // Setup IO Stream
         self.allocator = &self.arena.allocator;
         defer self.deinit();
         defer self.connectionLost();
         const app = self.application;
         const params = &app.options;
-        const stream = &self.io.out.stream;
+        const stream = &self.io;
         var timer = try time.Timer.start();
         while (true) {
             timer.reset();
@@ -291,35 +289,36 @@ pub const HttpServerConnection = struct {
 
     // Read the until we get a \r\n\r\n this is the stop of the headers
     pub fn readUntilDoubleNewline(self: *HttpServerConnection,) ![]u8 {
-        const stream = &self.io.in.stream;
+        const stream = &self.io;//.file.inStream().stream;
         const params = &self.application.options;
         const expiry = params.header_timeout * 1000; // ms to ns
 
+        //var buf = try self.allocator.alloc(u8, params.max_header_size);
         var buf = try std.Buffer.initCapacity(self.allocator, mem.page_size);
-        defer buf.deinit();
+        //defer buf.deinit();
 
         // FIXME: they can just block on readByte
         //var timer = try time.Timer.start();
 
-        var last_byte: ?u8 = null;
-        while (true) {
+        var last_byte: u8 = '0';
+        var i: usize = 0;
+        while (true) : (i += 1) {
             var byte: u8 = try stream.readByte();
-            if (byte == '\n' and last_byte != null and last_byte.?== '\n') {
+            if (byte == '\n' and last_byte == '\n') {
                 //std.debug.warn("Read header took {}us", timer.read()/1000);
                 return buf.toOwnedSlice();
-            } else if (byte == '\r' and last_byte != null and last_byte.? == '\n') {
+            } else if (byte == '\r' and last_byte == '\n') {
                 // Ignore \r if we just had \n
             } else {
                 last_byte = byte;
             }
 
-            if (buf.len() == params.max_header_size) {
+            if (i == params.max_header_size) {
                 return error.HeaderTooLong;
             }
 
             // FIXME: This is a syscall per byte
             //if (timer.read() >= expiry) return error.TimeoutError;
-
             try buf.appendByte(byte);
             //std.debug.warn("Loop took {}us\n", timer.lap()/1000);
         }
@@ -412,7 +411,7 @@ pub const HttpServerConnection = struct {
         var buf = try std.Buffer.initSize(self.allocator, params.chunk_size);
         defer buf.deinit();
 
-        const stream = &self.io.in.stream;
+        const stream = &self.io;//&self.io.file.inStream().stream;
         var left = request.content_length;
         const expiry = params.body_timeout * 1000; // ms to ns
         //var timer = try time.Timer.start();
@@ -431,7 +430,7 @@ pub const HttpServerConnection = struct {
 
     fn readChunkedBody(self: *HttpServerConnection, request: *HttpRequest) !void {
         // TODO: "chunk extensions" http://tools.ietf.org/html/rfc2616#section-3.6.1
-        const stream = &self.io.in.stream;
+        const stream = &self.io;//&self.io.file.inStream().stream;
         var total_size: u32 = 0;
 
         const params = &self.application.options;
@@ -481,7 +480,7 @@ pub const HttpServerConnection = struct {
     }
 
     fn readBodyUntilClose(self: *HttpServerConnection, request: *HttpRequest) !void {
-        const stream = &self.io.in.stream;
+        const stream = &self.io.file.inStream().stream;
         const body = try stream.readAllAlloc(
             self.allocator, self.application.options.max_body_size);
         try request.dataReceived(body);
@@ -504,7 +503,7 @@ pub const HttpServerConnection = struct {
 
     // Write the request
     pub fn sendResponse(self: *HttpServerConnection, response: *HttpResponse) !void {
-        const stream = &self.io.out.stream;
+        const stream = &self.io;//&self.io.file.outStream().stream;
         const request = response.request;
 
         // Finalize any headers
@@ -557,7 +556,7 @@ pub const HttpServerConnection = struct {
         }
 
         // Flush anything left
-        try self.io.out.flush();
+        try stream.flush();
 
         // Finish
         // If the app finished the request while we're still reading,
@@ -571,7 +570,7 @@ pub const HttpServerConnection = struct {
     }
 
     pub fn loseConnection(self: *HttpServerConnection) void {
-        self.file.close();
+        self.io.close();
         self.closed = true;
     }
 
@@ -870,21 +869,24 @@ pub const Application = struct {
             lock.release();
 
             // Spawn the async stuff
-            frame.* = async self.startServing(conn, server_conn);
+            if (comptime std.io.is_async) {
+                frame.* = async self.startServing(conn, server_conn);
+            } else {
+                try self.startServing(conn, server_conn);
+            }
         }
     }
 
     // ------------------------------------------------------------------------
     // Handling
     // ------------------------------------------------------------------------
-    async fn startServing(self: *Application,
+    fn startServing(self: *Application,
             conn: net.StreamServer.Connection,
             server_conn: *HttpServerConnection) !void {
 
         // Bulild the connection
         server_conn.* = HttpServerConnection{
             .arena = ArenaAllocator.init(self.allocator),
-            .file = conn.file,
             .io = IOStream.init(conn.file),
             .address = conn.address,
             .application = self,
