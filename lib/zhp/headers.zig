@@ -164,7 +164,7 @@ pub const HttpHeaders = struct {
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
     pub fn formatDate(allocator: *Allocator, timestamp: u64) ![]const u8 {
         const d = Datetime.fromTimestamp(timestamp);
-        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {}:{}:{} {}",
+        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {}:{}:{} {}", .{
             d.date.weekdayName()[0..3],
             d.date.day,
             d.date.monthName()[0..3],
@@ -172,7 +172,8 @@ pub const HttpHeaders = struct {
             d.time.hour,
             d.time.minute,
             d.time.second,
-            d.time.zone.name);
+            d.time.zone.name
+        });
     }
 
 };

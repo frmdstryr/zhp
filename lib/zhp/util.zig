@@ -8,7 +8,6 @@ const assert = std.debug.assert;
 const Buffer = std.Buffer;
 
 pub const IOStream = struct {
-    pub const stack_size = 1 * 1024 * 1024;
     pub const buffer_size = mem.page_size;
     pub const WriteError = File.WriteError;
     pub const ReadError = File.ReadError;
@@ -21,12 +20,28 @@ pub const IOStream = struct {
 
 
     const Self = @This();
-    file: File,
+    in_file: File,
+    out_file: File,
 
     pub fn init(file: File) IOStream {
         return IOStream{
-            .file = file,
+            .in_file = file,
+            .out_file = file,
         };
+    }
+
+    pub fn initStdIo() IOStream {
+        return IOStream{
+            .in_file = std.io.getStdIn(),
+            .out_file = std.io.getStdOut(),
+        };
+    }
+
+    // Load into the in buffer for testing purposes
+    pub fn load(self: *Self, in_buffer: []const u8) void {
+        mem.copy(u8, self._in_buffer[0..], in_buffer);
+        self._in_start_index = 0;
+        self._in_end_index = in_buffer.len;
     }
 
     pub fn reinit(self: *Self, file: File) void {
@@ -64,7 +79,7 @@ pub const IOStream = struct {
                 // we can read more data from the unbuffered stream
                 if (dest_space < buffer_size) {
                     self._in_start_index = 0;
-                    self._in_end_index = try self.file.read(self._in_buffer[0..]);
+                    self._in_end_index = try self.in_file.read(self._in_buffer[0..]);
 
                     // Shortcut
                     if (self._in_end_index >= dest_space) {
@@ -75,7 +90,7 @@ pub const IOStream = struct {
                 } else {
                     // asking for so much data that buffering is actually less efficient.
                     // forward the request directly to the unbuffered stream
-                    const amt_read = try self.file.read(dest[dest_index..]);
+                    const amt_read = try self.in_file.read(dest[dest_index..]);
                     return dest_index + amt_read;
                 }
             }
@@ -235,8 +250,9 @@ pub const IOStream = struct {
             self._in_start_index = 0;
             if (self._in_end_index < 1) return error.EndOfStream;
         }
+        var c = self._in_buffer[self._in_start_index];
         self._in_start_index += 1;
-        return self._in_buffer[self._in_start_index];
+        return c;
     }
 
     /// Same as `readByte` except the returned byte is signed.
@@ -330,7 +346,7 @@ pub const IOStream = struct {
             return;
         } else if (bytes.len >= buffer_size) {
             try self.flush();
-            return self.file.write(bytes);
+            return self.out_file.write(bytes);
         }
         var src_index: usize = 0;
 
@@ -357,7 +373,7 @@ pub const IOStream = struct {
     }
 
     pub fn flush(self: *Self) !void {
-        try self.file.write(self._out_buffer[0..self._out_index]);
+        try self.out_file.write(self._out_buffer[0..self._out_index]);
         self._out_index = 0;
     }
 
@@ -366,12 +382,15 @@ pub const IOStream = struct {
         return self.writeFn(self, slice);
     }
 
-    pub fn print(self: *Self, comptime format: []const u8, args: ...) !void {
+    pub fn print(self: *Self, comptime format: []const u8, args: var) !void {
         return std.fmt.format(self, WriteError, Self.writeFn, format, args);
     }
 
     pub fn close(self: *Self) void {
-        self.file.close();
+        self.in_file.close();
+        if (self.in_file.handle != self.out_file.handle) {
+            self.out_file.close();
+        }
     }
 
 };
@@ -434,10 +453,6 @@ test "string-array-map" {
 }
 
 
-pub fn tuple(comptime t1: type, comptime t2: type) type {
-    return struct {first: t1, second: t2};
-}
-
 const GzipDecompressor = struct{
     allocator: *Allocator,
     unconsumed_tail: []const u8,
@@ -454,7 +469,7 @@ const GzipDecompressor = struct{
 };
 
 
-pub fn in(comptime T: type, a: var, comptime args: ...) bool {
+pub fn in(comptime T: type, a: var, comptime args: var) bool {
     inline for (args) | arg | {
         if (mem.eql(T, a, arg)) return true;
     }

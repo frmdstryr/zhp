@@ -11,19 +11,19 @@ pub const ServerErrorHandler = struct {
         try response.body.replaceContents("");
 
         if (@errorReturnTrace()) |trace| {
-            try response.stream.print("<h1>Server Error</h1>");
+            try response.stream.write("<h1>Server Error</h1>");
             //std.debug.dumpStackTrace(trace.*);
 
             try response.stream.print(
-                "<h3>Request</h3><pre>{}</pre>", response.request);
-            try response.stream.print("<h3>Error Trace</h3><pre>");
+                "<h3>Request</h3><pre>{}</pre>", .{response.request});
+            try response.stream.write("<h3>Error Trace</h3><pre>");
             try std.debug.writeStackTrace(
                 trace.*,
                 &response.stream,
                 self.handler.application.allocator,
                 try std.debug.getSelfDebugInfo(),
                 false);
-            try response.stream.print("</pre>");
+            try response.stream.write("</pre>");
         } else {
             try response.body.append("<h1>Server Error</h1>");
         }

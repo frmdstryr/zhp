@@ -1,14 +1,14 @@
 const std = @import("std");
 const web = @import("zhp").web;
 
-pub const io_mode = .evented;
+//pub const io_mode = .evented;
 
 const MainHandler = struct {
     handler: web.RequestHandler,
 
     pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "text/plain");
-        try response.stream.write("Hello, World!");
+        try response.body.append("Hello, World!");
     }
 
 };
@@ -60,7 +60,9 @@ const ErrorTestHandler = struct {
 
 
 pub fn main() anyerror!void {
-    std.event.Loop.instance.?.beginOneEvent();
+    //std.event.Loop.instance.?.beginOneEvent();
+    //var memory: [1024*1024]u8 = undefined;
+    //var allocator = &std.heap.FixedBufferAllocator.init(memory[0..]).allocator;
 
     //var allocator = &std.heap.ArenaAllocator.init(std.heap.page_allocator).allocator;
     var routes = [_]web.Route{
