@@ -2,29 +2,31 @@ language: cpp
 dist: bionic
 before_install:
     # Install zig dependencies
-    - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-    - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-    - sudo apt-add-repository -y 'deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-9 main'
-    - sudo apt-get remove -y llvm-*
-    #- sudo rm -rf /usr/local/*
-    - sudo apt-get install -y libxml2-dev libclang-9-dev llvm-9 llvm-9-dev cmake s3cmd gcc-7 g++-7 qemu
+    #- sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+    #- wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+    #- sudo apt-add-repository -y 'deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-9 main'
+    #- sudo apt-get remove -y llvm-*
+    #- sudo apt-get install -y libxml2-dev libclang-9-dev llvm-9 llvm-9-dev cmake s3cmd gcc-7 g++-7 qemu
 
     # Install zig
-    - export CC=gcc-7
-    - export CXX=g++-7
-    - git clone https://github.com/ziglang/zig
-    - cd zig
-    - mkdir build
-    - cd build
-    - cmake .. -DCMAKE_BUILD_TYPE=Release
-    - make -j2 install
-    - export PATH="/home/travis/build/frmdstryr/zhp/zig/build/bin:$PATH"
+    #- export CC=gcc-7
+    #- export CXX=g++-7
+    #- git clone https://github.com/ziglang/zig
+    #- cd zig
+    #- mkdir build
+    #- cd build
+    #- cmake .. -DCMAKE_BUILD_TYPE=Release
+    #- make -j2 install
+    #- export PATH="/home/travis/build/frmdstryr/zhp/zig/build/bin:$PATH"
+
+    # Install zig
+    - sudo snap install zig --classic --edge
 
     # Make sure zig runs
     - zig --help
 
-    # Make sure it builds
+    # Make sure this repo builds
     - zig build
 
 script:
-    - zig test --Drelease-fast=safe lib/zhp/request.zig
+    - zig test --Drelease-fast=true lib/zhp/request.zig
