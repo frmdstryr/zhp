@@ -661,7 +661,7 @@ pub const Application = struct {
                     context: *Context) !void {
         const server_conn = &context.server_conn;
         const buffer = &context.buffer;
-        std.debug.warn("Start serving {}\n", .{conn.file.handle});
+        //std.debug.warn("Start serving {}\n", .{conn.file.handle});
 
         // Bulild the connection
         server_conn.* = HttpServerConnection{
@@ -673,14 +673,14 @@ pub const Application = struct {
 
         // Send it
         server_conn.startRequestLoop() catch |err| {
-            std.debug.warn("Error {} {}\n", .{conn.file.handle, err});
+            //std.debug.warn("Error {} {}\n", .{conn.file.handle, err});
             switch (err) {
                 error.ConnectionResetByPeer => {}, // Ignore
                 else => return err,
             }
         };
 
-        std.debug.warn("Done serving {}\n", .{conn.file.handle});
+        //std.debug.warn("Done serving {}\n", .{conn.file.handle});
 
          // Free the connection and set the frame to be cleaned up later
          var lock = self.lock.acquire();
