@@ -17,7 +17,7 @@ before_install:
     - mkdir build
     - cd build
     - cmake .. -DCMAKE_BUILD_TYPE=Release
-    - sudo make -j2 install
+    - make -j2 install
     - export PATH="/home/travis/build/frmdstryr/zhp/zig/build/bin:$PATH"
 
     # Make sure zig runs
