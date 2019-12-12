@@ -93,12 +93,12 @@ pub const IOStream = struct {
 
     // Swap the current buffer with a new buffer copying any unread bytes
     // into the new buffer
-    pub fn swapBuffer(self: *Self, buffer: []u8) !void {
+    pub fn swapBuffer(self: *Self, buffer: []u8) void {
         if (builtin.is_test) {
             self._in_start_index = 0;
             self._in_end_index = buffer.len;
             self._in_count = 0;
-            if (buffer.len == 0) return error.EndOfStream;
+            //if (buffer.len == 0) return error.EndOfStream;
             return;
         }
 
@@ -106,9 +106,9 @@ pub const IOStream = struct {
         self._in_buffer = buffer; // Set it right away
         self._in_start_index = buffer.len;
         self._in_end_index = buffer.len;
-        const n = try self.read(buffer[0..]);
-        self._in_start_index = 0;
-        self._in_end_index = n;
+        //const n = try self.read(buffer[0..]);
+        //self._in_start_index = 0;
+        //self._in_end_index = n;
         self._in_count = 0;
     }
 

@@ -85,11 +85,11 @@ pub const HttpServerConnection = struct {
                 else => return err,
             };
             //defer request.deinit();
-            //std.debug.warn("readRequest: {}ns\n", timer.lap());
+            std.debug.warn("readRequest took: {}ns\n", .{timer.lap()});
 
             const keep_alive = self.canKeepAlive(request);
             var response = try self.buildResponse(request);
-            //std.debug.warn("buildResp: {}ns\n", timer.lap());
+            std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
 
             var factory = try app.processRequest(self, request, response);
             if (factory != null) {
@@ -121,12 +121,13 @@ pub const HttpServerConnection = struct {
                  };
             }
             try app.processResponse(self, response);
-            //std.debug.warn("process: {}ns\n", timer.lap());
+            std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
 
             // TODO: Write in chunks
             if (self.closed) return;
             try self.sendResponse(response);
             if (self.closed or !keep_alive) return;
+            std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
             //std.debug.warn("[{}] {} {} in {}ns\n", .{
             //    self.address, request.method, request.path,
             //    timer.lap()});
@@ -142,12 +143,15 @@ pub const HttpServerConnection = struct {
     // Read a new request from the stream
     // this does not read the body of the request.
     pub fn readRequest(self: *HttpServerConnection) !*HttpRequest {
+        var timer = try std.time.Timer.start();
         const request = try self.allocator.create(HttpRequest);
         const stream = &self.io;//.file.inStream().stream;
         const params = &self.application.options;
         const timeout = params.header_timeout * 1000; // ms to ns
         request.* = try HttpRequest.initCapacity(self.allocator, 4096, 32);
+        std.debug.warn("  createRequest took: {}ns\n", .{timer.lap()});
         const n = try request.parse(stream);
+        std.debug.warn("  parseRequest took: {}ns\n", .{timer.lap()});
         return request;
     }
 

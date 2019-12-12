@@ -86,9 +86,13 @@ pub const HttpRequest = struct {
 
     // Parse using default sizes
     pub fn parse(self: *HttpRequest, stream: *IOStream) !usize {
+        var timer = try std.time.Timer.start();
         var n = try self.parseRequestLine(stream, 2048);
+        std.debug.warn("    parseRequestLine took: {}ns\n", .{timer.lap()});
         n += try self.parseHeaders(stream, 32*1024);
+        std.debug.warn("    parseHeaders took: {}ns\n", .{timer.lap()});
         try self.parseContentLength(100*1024*1024);
+        std.debug.warn("    parseContentLength took: {}ns\n", .{timer.lap()});
         return n;
     }
 
@@ -99,12 +103,14 @@ pub const HttpRequest = struct {
         // Want to ensure we can dump directly into the buffer
         try self.buffer.resize(max_size);
         const buf = &self.buffer;
-        try stream.swapBuffer(buf.toSlice());
+        stream.swapBuffer(buf.toSlice());
         //self.buffer.len = 0;
 
         // FIXME: If the whole method is not in the initial read
         // buffer this bails out
+        var timer = try std.time.Timer.start();
         var ch: u8 = try stream.readByte();
+        std.debug.warn("      readFirstByte took: {}ns\n", .{timer.lap()});
 
         // Skip any leading CRLFs
         while (stream.readCount() < max_size) {

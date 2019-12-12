@@ -1,0 +1,26 @@
+language: cpp
+dist: bionic
+addons:
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
+    - llvm-toolchain-trusty
+    packages:
+      - clang-9
+      - libclang-9-dev
+      - llvm-9-dev
+
+before_install:
+    # Install zig
+    - git clone https://github.com/ziglang/zig
+    - cd zig
+    - mkdir build
+    - cd build
+    - cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PREFIX -DZIG_STATIC=ON
+    - make install
+
+    # Make sure it builds
+    - zig build
+
+script:
+    - zig test --Drelease-fast=safe lib/zhp/request.zig
