@@ -22,6 +22,7 @@ pub const IOStream = struct {
     _out_count: usize = 0,
     _out_buffer: []u8 = undefined,
     _out_index: usize = 0,
+    closed: bool = false,
 
     _test_buffer: []u8 = undefined,
 
@@ -80,6 +81,7 @@ pub const IOStream = struct {
         self._in_start_index = 0;
         self._in_count = 0;
         self._out_count = 0;
+        self.closed = false;
     }
 
     pub fn reinit(self: *Self, file: File) void {
@@ -89,7 +91,7 @@ pub const IOStream = struct {
         self._out_index = 0;
     }
 
-        // Swap the current buffer with a new buffer copying any unread bytes
+    // Swap the current buffer with a new buffer copying any unread bytes
     // into the new buffer
     pub fn swapBuffer(self: *Self, buffer: []u8) !void {
         if (builtin.is_test) {
@@ -310,7 +312,8 @@ pub const IOStream = struct {
     pub fn readByte(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
             // Do a direct read into the input buffer
-            self._in_end_index = try self.read(self._in_buffer[0..buffer_size]);
+            self._in_end_index = try self.read(
+                self._in_buffer[0..self._in_buffer.len]);
             self._in_start_index = 0;
             if (self._in_end_index < 1) return error.EndOfStream;
         }
@@ -321,7 +324,7 @@ pub const IOStream = struct {
 
     pub fn readByteFast(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
-            return error.EndOfStream;
+            return error.EndOfBuffer;
         }
         const c = self._in_buffer[self._in_start_index];
         self._in_start_index += 1;
@@ -469,6 +472,8 @@ pub const IOStream = struct {
     // Cleanup
     // ------------------------------------------------------------------------
     pub fn close(self: *Self) void {
+        if (self.closed) return;
+        self.closed = true;
         self.in_file.close();
         if (self.in_file.handle != self.out_file.handle) {
             self.out_file.close();

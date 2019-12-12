@@ -42,20 +42,37 @@ pub const HttpServerConnection = struct {
     pub fn startRequestLoop(self: *HttpServerConnection) !void {
         defer self.connectionLost();
         self.allocator = &self.buffer.allocator;
-        self.io = try IOStream.initCapacity(self.allocator, self.file, mem.page_size);
+        self.io = try IOStream.initCapacity(
+            self.allocator, self.file, mem.page_size);
         const app = self.application;
         const params = &app.options;
         const stream = &self.io;
         var timer = try time.Timer.start();
         while (true) {
             defer self.buffer.reset();
-            //var buffer: [1024*1024]u8 = undefined;
-            //self.allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
-            //std.debug.warn("{}", .{stream._in_buffer});
-            var request = self.readRequest() catch |err| switch(err) {
-                error.HttpInputError,
-                error.HeaderTooLong => {
+            var request = self.readRequest() catch |err| switch (err) {
+                error.BadRequest => {
                     try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                    self.loseConnection();
+                    return;
+                },
+                error.MethodNotAllowed => {
+                    try stream.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
+                    self.loseConnection();
+                    return;
+                },
+                error.RequestEntityTooLarge => {
+                    try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
+                    self.loseConnection();
+                    return;
+                },
+                error.RequestUriTooLong => {
+                    try stream.write("HTTP/1.1 413 Request-URI Too Long\r\n\r\n");
+                    self.loseConnection();
+                    return;
+                },
+                error.RequestHeaderFieldsTooLarge => {
+                    try stream.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
                     self.loseConnection();
                     return;
                 },
@@ -73,12 +90,11 @@ pub const HttpServerConnection = struct {
             const keep_alive = self.canKeepAlive(request);
             var response = try self.buildResponse(request);
             //std.debug.warn("buildResp: {}ns\n", timer.lap());
-            //defer response.deinit();
 
             var factory = try app.processRequest(self, request, response);
             if (factory != null) {
                 self.readBody(request, response) catch |err| switch(err) {
-                    error.HttpInputError,
+                    error.BadRequest,
                     error.ImproperlyTerminatedChunk,
                     error.BodyTooLong => {
                         try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
@@ -117,6 +133,7 @@ pub const HttpServerConnection = struct {
         }
     }
 
+    // Build the request handler to generate a response
     fn buildHandler(self: *HttpServerConnection, factory: Handler,
                     response: *HttpResponse) !*RequestHandler {
         return factory(self.allocator, self.application, response);
@@ -130,8 +147,7 @@ pub const HttpServerConnection = struct {
         const params = &self.application.options;
         const timeout = params.header_timeout * 1000; // ms to ns
         request.* = try HttpRequest.initCapacity(self.allocator, 4096, 32);
-        var n = try request.parseRequestLine(stream, timeout, 2048);
-        n = try request.parseHeaders(stream, timeout, params.max_header_size);
+        const n = try request.parse(stream);
         return request;
     }
 
@@ -167,7 +183,7 @@ pub const HttpServerConnection = struct {
             if (headers.contains("Transfer-Encoding") or !(content_length == 0)) {
                 //std.debug.warn(
                 //    "Response with code {} should not have a body", .{code});
-                return error.HttpInputError;
+                return error.BadRequest;
             }
             return;
         }
@@ -256,7 +272,7 @@ pub const HttpServerConnection = struct {
     }
 
     fn readBodyUntilClose(self: *HttpServerConnection, request: *HttpRequest) !void {
-        const stream = &self.io.file.inStream().stream;
+        const stream = &self.io;
         const body = try stream.readAllAlloc(
             self.allocator, self.application.options.max_body_size);
         try request.dataReceived(body);
@@ -279,7 +295,7 @@ pub const HttpServerConnection = struct {
 
     // Write the request
     pub fn sendResponse(self: *HttpServerConnection, response: *HttpResponse) !void {
-        const stream = &self.io; //&self.io.file.outStream().stream;
+        const stream = &self.io;
         const request = response.request;
 
         // Finalize any headers
@@ -297,11 +313,10 @@ pub const HttpServerConnection = struct {
         }
 
         // Write status line
-        //try stream.print("HTTP/1.1 {} OK\r\n", .{
-        //    response.status.code,
-        //    response.status.phrase
-        //});
-        try stream.write("HTTP/1.1 200 OK\r\n");
+        try stream.print("HTTP/1.1 {} {}\r\n", .{
+            response.status.code,
+            response.status.phrase
+        });
 
         // Write headers
         for (response.headers.toSlice()) |header| {
@@ -537,8 +552,10 @@ pub const Router = struct {
 
 const Middleware = struct {
     // Process the request and return the reponse
-    processRequest: fn(self: *Middleware, request: *HttpRequest, response: *HttpResponse) anyerror!bool,
-    processResponse: fn(self: *Middleware, response: *HttpResponse) anyerror!void,
+    processRequest: fn(self: *Middleware,
+        request: *HttpRequest, response: *HttpResponse) anyerror!bool,
+    processResponse: fn(self: *Middleware,
+        response: *HttpResponse) anyerror!void,
 };
 
 
@@ -682,12 +699,12 @@ pub const Application = struct {
 
         //std.debug.warn("Done serving {}\n", .{conn.file.handle});
 
-         // Free the connection and set the frame to be cleaned up later
-         var lock = self.lock.acquire();
+        // Free the connection and set the frame to be cleaned up later
+        var lock = self.lock.acquire();
             if (self.used_connections.remove(context)) |e| {
                 const r = try self.free_connections.put(context, e.value);
             }
-         lock.release();
+        lock.release();
     }
 
     // ------------------------------------------------------------------------
