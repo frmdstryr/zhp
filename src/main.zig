@@ -1,7 +1,7 @@
 const std = @import("std");
 const web = @import("zhp").web;
 
-//pub const io_mode = .evented;
+pub const io_mode = .evented;
 
 const MainHandler = struct {
     handler: web.RequestHandler,

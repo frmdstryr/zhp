@@ -12,432 +12,17 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const re = @import("re/regex.zig").Regex;
+//const re = @import("re/regex.zig").Regex;
 const responses = @import("status.zig");
 const handlers = @import("handlers.zig");
 
 const HttpHeaders = @import("headers.zig").HttpHeaders;
 const HttpStatus = responses.HttpStatus;
 const util = @import("util.zig");
-const in = util.in;
 const IOStream = util.IOStream;
 
-
-pub const HttpRequest = struct {
-    pub const Method = enum {
-        Get,
-        Put,
-        Post,
-        Patch,
-        //Copy,
-        //Move,
-        //Lock,
-        Head,
-        // Mkcol,
-
-        // Trace,
-        Delete,
-        Options,
-        Unknown
-    };
-    method: Method = .Unknown,
-
-    pub const Version = enum {
-        Http1_0,
-        Http1_1,
-        Unknown
-    };
-    version: Version = .Unknown,
-    path: []const u8 = "",
-    content_length: usize = 0,
-    _read_finished: bool = false,
-    headers: HttpHeaders,
-
-    // Holds path and headers
-    buffer: std.Buffer,
-
-    // Holds the rest
-    body: std.Buffer,
-
-    pub fn init(allocator: *Allocator) !HttpRequest {
-        return HttpRequest{
-            .headers = HttpHeaders.init(allocator),
-            .buffer = try std.Buffer.initCapacity(allocator, mem.page_size),
-            .body = try std.Buffer.initSize(allocator, 0),
-        };
-    }
-
-    // Based on NGINX's parser
-    pub fn parseRequestLine(self: *HttpRequest, stream: *IOStream,
-                            timeout: u64, max_size: usize) !usize {
-        var cnt: usize = 0;
-        var ch: u8 = 0;
-
-        // Skip any leading CRLFs
-        while (true) : (cnt += 1) {
-            if (cnt == max_size) return error.StreamTooLong; // Too Big
-            ch = try stream.readByte();
-            // Skip whitespace
-            if (ch == '\r' or ch == '\n') continue;
-            if ((ch < 'A' or ch > 'Z') and ch != '_' and ch != '-') {
-                return error.MalformedHttpRequest;
-            }
-            break;
-        }
-
-        // Read the method
-        switch (ch) {
-            'G' => { // GET
-                inline for("ET") |expected| {
-                    ch = try stream.readByte();
-                    if (ch != expected) return error.MalformedHttpRequest;
-                }
-                cnt += 3;
-                self.method = Method.Get;
-            },
-            'P' => {
-                ch = try stream.readByte();
-                switch (ch) {
-                    'U' => {
-                        ch = try stream.readByte();
-                        if (ch != 'T') return error.MalformedHttpRequest;
-                        cnt += 3;
-                        self.method = Method.Put;
-                    },
-                    'O' => {
-                        inline for("ST") |expected| {
-                            ch = try stream.readByte();
-                            if (ch != expected) return error.MalformedHttpRequest;
-                        }
-                        cnt += 4;
-                        self.method = Method.Post;
-                    },
-                    'A' => {
-                        inline for("TCH") |expected| {
-                            ch = try stream.readByte();
-                            if (ch != expected) return error.MalformedHttpRequest;
-                        }
-                        cnt += 5;
-                        self.method = Method.Patch;
-                    },
-                    else => return error.MalformedHttpRequest,
-                }
-            },
-            'H' => {
-                inline for("EAD") |expected| {
-                    ch = try stream.readByte();
-                    if (ch != expected) return error.MalformedHttpRequest;
-                }
-                cnt += 4;
-                self.method = Method.Head;
-            },
-            'D' => {
-                inline for("ELETE") |expected| {
-                    ch = try stream.readByte();
-                    if (ch != expected) return error.MalformedHttpRequest;
-                }
-                cnt += 6;
-                self.method = Method.Delete;
-            },
-            'O' => {
-                inline for("PTIONS") |expected| {
-                    ch = try stream.readByte();
-                    if (ch != expected) return error.MalformedHttpRequest;
-                }
-                cnt += 7;
-                self.method = Method.Options;
-
-            },
-            else => return error.MalformedHttpRequest,
-        }
-
-        // Check separator
-        ch = try stream.readByte();
-        if (ch != ' ') return error.MalformedHttpRequest;
-        cnt += 1;
-
-        // TODO: Validate the path
-        var buf = &self.buffer;
-        var index = buf.len();
-        while (true) : (cnt += 1) {
-            if (cnt == max_size) return error.StreamTooLong; // Too Big
-            ch = try stream.readByte();
-            if (ch == ' ') {
-                self.path = buf.toSlice()[index..buf.len()];
-                break;
-            } else if (!ascii.isPrint(ch)) {
-                // TODO: @setCold(true);
-                return error.MalformedHttpRequest;
-            }
-            try buf.appendByte(ch);
-        }
-
-        if (self.path.len == 0) return error.MalformedHttpRequest;
-
-        // Read version
-        inline for("HTTP/1.") |expected| {
-            ch = try stream.readByte();
-            if (ch != expected) return error.MalformedHttpRequest;
-        }
-        ch = try stream.readByte();
-        self.version = switch (ch) {
-            '0' => Version.Http1_0,
-            '1' => Version.Http1_1,
-            else => return error.UnsupportedHttpVersion,
-        };
-        cnt += 8;
-
-        // Read to end of the line
-        ch = try stream.readByte();
-        if (ch == '\r') {
-            ch = try stream.readByte();
-            cnt += 1;
-        }
-        if (ch != '\n') return error.MalformedHttpRequest;
-        return cnt;
-    }
-
-
-    pub fn parseHeaders(self: *HttpRequest, stream: *IOStream,
-                        timeout: u64, max_size: usize) !usize {
-        const State = enum {
-            KeyStart,
-            Key,
-            Value,
-            ValueStart,
-            MaybeEnd,
-        };
-        var state: State = State.KeyStart;
-        var headers = &self.headers;
-
-        // Reuse the request buffer for this
-        var buf = &self.buffer;
-        var index = buf.len();
-
-        var key: ?[]u8 = null;
-        var cnt: usize = 0;
-        var last_byte: u8 = '0';
-
-        // Strip any whitespace
-        while (true) : (cnt += 1) {
-            if (cnt == max_size) return error.HeaderTooLong;
-            var ch = try stream.readByte();
-            switch (state) {
-                .KeyStart => {
-                    if (ch == '\r' or ch == '\n') continue;
-                    if (ch == ' ' or ch == '\t') {
-                        // first header line cannot start with whitespace
-                        if (key == null) return error.HttpInputError;
-                        state = .ValueStart; // Continuation of multi-line header
-                        continue;
-                    }
-                    state = .Key;
-                    try buf.appendByte(ch);
-                },
-                .Key => {
-                    if (ch == ':') {
-                        // Empty key
-                        if (buf.len() == 0) return error.HttpInputError;
-                        state = .ValueStart;
-                        key = buf.toSlice()[index..buf.len()];
-                        //std.debug.warn("Header '{}'=", key);
-                        index = buf.len();
-                        continue;
-                    }
-                    try buf.appendByte(ch);
-                },
-
-                // Ignore starting whitespace
-                .ValueStart => {
-                    if (ch == ' ' or ch == '\t') continue;
-                    state = .Value;
-                    try buf.appendByte(ch);
-                },
-                .Value => {
-                    if (ch == '\r') continue;
-                    if (ch == '\n') {
-                        var value = mem.trimRight(u8,
-                            buf.toSlice()[index..buf.len()], " \t");
-                        index = buf.len();
-                        try headers.put(key.?, value);
-                        //std.debug.warn("'{}'\n", value);
-                        state = .MaybeEnd;
-                        continue;
-                    }
-                    try buf.appendByte(ch);
-                },
-                .MaybeEnd => {
-                    if (ch == '\r') continue;
-                    if (ch == '\n') {
-                        try self.parseContentLength();
-                        return cnt;
-                    }
-                    state = .KeyStart;
-                    try buf.appendByte(ch);
-                }
-            }
-        }
-    }
-
-    pub fn parseContentLength(self: *HttpRequest) !void {
-        var headers = &self.headers;
-        // Read content length
-        if (!headers.contains("Content-Length")) {
-            self.content_length = 0;
-            return;
-        }
-
-        if (headers.contains("Transfer-Encoding")) {
-            // Response cannot contain both Content-Length and
-            // Transfer-Encoding headers.
-            // http://tools.ietf.org/html/rfc7230#section-3.3.3
-            return error.HttpInputError;
-        }
-        var content_length_header = try headers.get("Content-Length");
-
-        // Proxies sometimes cause Content-Length headers to get
-        // duplicated.  If all the values are identical then we can
-        // use them but if they differ it's an error.
-        var it = mem.separate(content_length_header, ",");
-        while (it.next()) |piece| {
-            try headers.put("Content-Length", piece);
-            break; // TODO: Just use the first
-        }
-
-        self.content_length = std.fmt.parseInt(u32, content_length_header, 10)
-            catch return error.HttpInputError;
-    }
-
-
-    pub fn dataReceived(self: *HttpRequest, data: []const u8) !void {
-        try self.body.append(data);
-    }
-
-    // Callback
-    //dataReceived: fn(self: *HttpRequest, data: []const u8) anyerror!void = onDataReceived,
-
-    pub fn deinit(self: *HttpRequest) void {
-        self.buffer.deinit();
-        self.headers.deinit();
-        self.body.deinit();
-    }
-
-};
-
-
-test "parse-request-line" {
-    const allocator = std.heap.direct_allocator;
-    var stream = IOStream.initStdIo();
-    stream.load("GET /foo HTTP/1.1\r\n");
-    var request = try HttpRequest.init(allocator);
-    var n = try request.parseRequestLine(&stream, 0, 2048);
-    testing.expectEqual(request.method, HttpRequest.Method.Get);
-    testing.expectEqual(request.version, HttpRequest.Version.Http1_1);
-    testing.expectEqualSlices(u8, request.path, "/foo");
-
-    //stream.load("POST CRAP");
-    //request = try HttpRequest.init(allocator);
-    //testing.expectError(error.MalformedHttpRequest,
-    //    request.parseRequestLine(&stream, 0));
-
-//     var line = try HttpRequest.StartLine.parse(a, "GET /foo HTTP/1.1");
-//     testing.expect(mem.eql(u8, line.method, "GET"));
-//     testing.expect(mem.eql(u8, line.path, "/foo"));
-//     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
-//     line = try RequestStartLine.parse("POST / HTTP/1.1");
-//     testing.expect(mem.eql(u8, line.method, "POST"));
-//     testing.expect(mem.eql(u8, line.path, "/"));
-//     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
-//
-//     testing.expectError(error.MalformedHttpRequest,
-//             RequestStartLine.parse(a, "POST CRAP"));
-//     testing.expectError(error.MalformedHttpRequest,
-//             RequestStartLine.parse(a, "POST /theform/ HTTP/1.1 DROP ALL TABLES"));
-//     testing.expectError(error.UnsupportedHttpVersion,
-//             RequestStartLine.parse(a, "POST / HTTP/2.0"));
-}
-
-test "parse-request-headers" {
-    const allocator = std.heap.direct_allocator;
-    var stream = IOStream.initStdIo();
-    stream.load(
-        \\Host: server
-        \\User-Agent: Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00
-        \\Cookie: uid=12345678901234567890; __utma=1.1234567890.1234567890.1234567890.1234567890.12; wd=2560x1600
-        \\Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
-        \\Accept-Language: en-US,en;q=0.5
-        \\Connection: keep-alive
-        \\
-        \\
-    );
-    var request = try HttpRequest.init(allocator);
-    var n = try request.parseHeaders(&stream, 0, 64000);
-}
-
-
-pub const HttpResponse = struct {
-    request: *HttpRequest,
-    headers: HttpHeaders,
-    status: HttpStatus = responses.OK,
-    disconnect_on_finish: bool = false,
-    chunking_output: bool = false,
-    body: std.Buffer,
-    stream: std.io.BufferOutStream.Stream = std.io.BufferOutStream.Stream{
-        .writeFn = HttpResponse.writeFn
-    },
-    _write_finished: bool = false,
-    _finished: bool = false,
-
-    pub const StartLine = struct {
-        version: []const u8,
-        code: u8,
-        reason: []const u8,
-
-        pub fn parse(allocator: *Allocator, line: []const u8) !StartLine {
-            // FIXME: Do this comptime somehow?
-            var pattern = try re.compile(allocator, "(HTTP/1\\.[0-9]) ([0-9]+) ([^\\r]*)");
-            defer pattern.deinit();
-            var match = (try re.captures(&pattern, line))
-                orelse return error.MalformedHttpResponse;
-            defer match.deinit();
-
-            const code = try std.fmt.parseInt(u8, match.sliceAt(2).?, 10);
-
-            return StartLine{
-                .version = match.sliceAt(1).?,
-                .code = code,
-                .reason = match.sliceAt(3).?,
-            };
-        }
-    };
-
-    // Wri
-    pub fn writeFn(out_stream: *std.io.BufferOutStream.Stream, bytes: []const u8) !void {
-        const self = @fieldParentPtr(HttpResponse, "stream", out_stream);
-        return self.body.append(bytes);
-    }
-
-
-    pub fn deinit(self: *HttpResponse) void {
-        self.headers.deinit();
-        self.request.deinit();
-        self.body.deinit();
-    }
-
-};
-
-
-//
-// test "parse-response-line" {
-//     const a = std.heap.direct_allocator;
-//     var line = try HttpResponse.StartLine.parse(a, "HTTP/1.1 200 OK");
-//     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
-//     testing.expect(line.code == 200);
-//     testing.expect(mem.eql(u8, line.reason, "OK"));
-//
-//     testing.expectError(error.MalformedHttpResponse,
-//         HttpResponse.StartLine.parse(a, "HTTP/1.1 ABC OK"));
-// }
+pub const HttpRequest = @import("request.zig").HttpRequest;
+pub const HttpResponse = @import("response.zig").HttpResponse;
 
 
 
@@ -446,26 +31,27 @@ pub const HttpResponse = struct {
 // the connection is reused to process futher requests.
 pub const HttpServerConnection = struct {
     application: *Application,
-    //buffer: std.heap.FixedBufferAllocator,
+    buffer: std.heap.FixedBufferAllocator,
     allocator: *Allocator = undefined,
-    io: IOStream,
+    file: fs.File,
+    io: IOStream = undefined,
     address: net.Address,
     closed: bool = false,
 
     // Handles a connection
     pub fn startRequestLoop(self: *HttpServerConnection) !void {
-        //self.allocator = &self.buffer.allocator;
         defer self.connectionLost();
+        self.allocator = &self.buffer.allocator;
+        self.io = try IOStream.initCapacity(self.allocator, self.file, mem.page_size);
         const app = self.application;
         const params = &app.options;
         const stream = &self.io;
         var timer = try time.Timer.start();
         while (true) {
-            //self.buffer.reset();
-            var buffer: [1024*1024]u8 = undefined;
-            self.allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
-
-            //timer.reset();
+            defer self.buffer.reset();
+            //var buffer: [1024*1024]u8 = undefined;
+            //self.allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
+            //std.debug.warn("{}", .{stream._in_buffer});
             var request = self.readRequest() catch |err| switch(err) {
                 error.HttpInputError,
                 error.HeaderTooLong => {
@@ -525,9 +111,9 @@ pub const HttpServerConnection = struct {
             if (self.closed) return;
             try self.sendResponse(response);
             if (self.closed or !keep_alive) return;
-            //std.debug.warn("[{}] {} {} in {}ns\n",
+            //std.debug.warn("[{}] {} {} in {}ns\n", .{
             //    self.address, request.method, request.path,
-            //    timer.lap());
+            //    timer.lap()});
         }
     }
 
@@ -540,127 +126,21 @@ pub const HttpServerConnection = struct {
     // this does not read the body of the request.
     pub fn readRequest(self: *HttpServerConnection) !*HttpRequest {
         const request = try self.allocator.create(HttpRequest);
-
         const stream = &self.io;//.file.inStream().stream;
         const params = &self.application.options;
         const timeout = params.header_timeout * 1000; // ms to ns
-        request.buffer = try std.Buffer.initCapacity(
-            self.allocator, mem.page_size);
+        request.* = try HttpRequest.initCapacity(self.allocator, 4096, 32);
         var n = try request.parseRequestLine(stream, timeout, 2048);
-        request.headers = HttpHeaders.init(self.allocator);
         n = try request.parseHeaders(stream, timeout, params.max_header_size);
-        request.body = try std.Buffer.initSize(self.allocator, 0);
-
-//         const header_data = try self.readUntilDoubleNewline();
-//         const result = try self.parseHeaders(header_data);
-//         const start_line = try HttpRequest.StartLine.parse(
-//            self.allocator, result.first_line);
-//         request.* = HttpRequest{
-//             .headers = result.headers,
-//             .method = start_line.method,
-//             .version = start_line.version,
-//             .path = start_line.path,
-//             .content_length = result.content_length,
-//             .body = try std.Buffer.initCapacity(self.allocator,
-//                 result.content_length),
-//         };
         return request;
     }
 
     pub fn buildResponse(self: *HttpServerConnection,
                      request: *HttpRequest) !*HttpResponse {
         const response = try self.allocator.create(HttpResponse);
-        response.request = request;
-        response.headers = HttpHeaders.init(self.allocator);
-        response.body = try std.Buffer.initCapacity(
-            self.allocator, mem.page_size);
+        response.* = try HttpResponse.initCapacity(self.allocator,
+            request, mem.page_size, 10);
         return response;
-    }
-
-    // Read the until we get a \r\n\r\n this is the stop of the headers
-    pub fn readUntilDoubleNewline(self: *HttpServerConnection,) ![]u8 {
-        const stream = &self.io;//.file.inStream().stream;
-        const params = &self.application.options;
-        const expiry = params.header_timeout * 1000; // ms to ns
-
-        //var buf = try self.allocator.alloc(u8, params.max_header_size);
-        var buf = try std.Buffer.initCapacity(self.allocator, mem.page_size);
-        //defer buf.deinit();
-
-        // FIXME: they can just block on readByte
-        //var timer = try time.Timer.start();
-
-        var last_byte: u8 = '0';
-        var i: usize = 0;
-        while (true) : (i += 1) {
-            var byte: u8 = try stream.readByte();
-            if (byte == '\n' and last_byte == '\n') {
-                //std.debug.warn("Read header took {}us", timer.read()/1000);
-                return buf.toOwnedSlice();
-            } else if (byte == '\r' and last_byte == '\n') {
-                // Ignore \r if we just had \n
-            } else {
-                last_byte = byte;
-            }
-
-            if (i == params.max_header_size) {
-                return error.HeaderTooLong;
-            }
-
-            // FIXME: This is a syscall per byte
-            //if (timer.read() >= expiry) return error.TimeoutError;
-            try buf.appendByte(byte);
-            //std.debug.warn("Loop took {}us\n", timer.lap()/1000);
-        }
-    }
-
-    const ParseResult = struct {
-        first_line: []const u8,
-        headers: HttpHeaders,
-        content_length: usize,
-    };
-
-    pub fn parseHeaders(self: *HttpServerConnection, data: []const u8) !ParseResult {
-        const params = &self.application.options;
-
-        var eol: usize = mem.indexOf(u8, data, "\n") orelse 0;
-        var headers = try HttpHeaders.parse(self.allocator, data[eol..]);
-        if (data[eol-1] == '\r') eol -= 1; // Strip \r
-
-        // Read content length
-        var content_length: usize = 0;
-        if (headers.contains("Content-Length")) {
-            if (headers.contains("Transfer-Encoding")) {
-                // Response cannot contain both Content-Length and
-                // Transfer-Encoding headers.
-                // http://tools.ietf.org/html/rfc7230#section-3.3.3
-                return error.HttpInputError;
-            }
-            var content_length_header = try headers.get("Content-Length");
-            if (mem.indexOf(u8, content_length_header, ",") != null) {
-                // Proxies sometimes cause Content-Length headers to get
-                // duplicated.  If all the values are identical then we can
-                // use them but if they differ it's an error.
-                var it = mem.separate(content_length_header, ",");
-                while (it.next()) |piece| {
-                    try headers.put("Content-Length", piece);
-                    break;
-                }
-
-            }
-
-            content_length = std.fmt.parseInt(u32, content_length_header, 10)
-                catch return error.HttpInputError;
-            if (content_length > params.max_body_size) {
-                return error.BodyTooLong;
-            }
-        }
-
-        return ParseResult{
-            .first_line = data[0..eol],
-            .headers = headers,
-            .content_length = content_length
-        };
     }
 
     fn readBody(self: *HttpServerConnection, request: *HttpRequest,
@@ -799,7 +279,7 @@ pub const HttpServerConnection = struct {
 
     // Write the request
     pub fn sendResponse(self: *HttpServerConnection, response: *HttpResponse) !void {
-        const stream = &self.io;//&self.io.file.outStream().stream;
+        const stream = &self.io; //&self.io.file.outStream().stream;
         const request = response.request;
 
         // Finalize any headers
@@ -817,15 +297,14 @@ pub const HttpServerConnection = struct {
         }
 
         // Write status line
-        try stream.print("HTTP/1.1 {} {}\r\n", .{
-            response.status.code,
-            response.status.phrase
-        });
+        //try stream.print("HTTP/1.1 {} OK\r\n", .{
+        //    response.status.code,
+        //    response.status.phrase
+        //});
+        try stream.write("HTTP/1.1 200 OK\r\n");
 
         // Write headers
-        var it = response.headers.iterator();
-
-        while (it.next()) |header| {
+        for (response.headers.toSlice()) |header| {
             try stream.print("{}: {}\r\n", .{header.key, header.value});
         }
 
@@ -1068,23 +547,17 @@ pub const Application = struct {
     router: Router,
     server: net.StreamServer,
     lock: std.Mutex,
-    const ConnectionMap = std.AutoHashMap(*HttpServerConnection, *@Frame(startServing));
 
-    pub const Connection = struct {
+
+    pub const Context = struct {
         // This is the max memory allowed per request
         buffer: [1024*1024]u8 = undefined,
-        file: fs.File,
-        address: net.Address,
-        server_conn: *HttpServerConnection,
-        frame: *@Frame(startServing),
+        server_conn: HttpServerConnection,
     };
+    const ConnectionMap = std.AutoHashMap(*Context, *@Frame(startServing));
 
-    connections: ConnectionMap,
-    const ConnectionPool = std.TailQueue(*Connection);
-    const FramesList = std.ArrayList(*@Frame(startServing));
-    active_connections: ConnectionPool,
-    free_connections: ConnectionPool,
-    frames: FramesList,
+    used_connections: ConnectionMap,
+    free_connections: ConnectionMap,
 
     middleware: std.ArrayList(*Middleware),
 
@@ -1132,10 +605,8 @@ pub const Application = struct {
             .options = options,
             .server = net.StreamServer.init(options.server_options),
             .lock = std.Mutex.init(),
-            .connections = ConnectionMap.init(allocator),
-            .frames = FramesList.init(allocator),
-            .active_connections = ConnectionPool.init(),
-            .free_connections = ConnectionPool.init(),
+            .used_connections = ConnectionMap.init(allocator),
+            .free_connections = ConnectionMap.init(allocator),
             .middleware = std.ArrayList(*Middleware).init(allocator),
         };
     }
@@ -1152,32 +623,33 @@ pub const Application = struct {
         const allocator = self.allocator;
 
         while (true) {
+            //const arena = ArenaAllocator.init(allocator);
             const conn = try self.server.accept();
-//             var conn: *ConnectionPool.Node = undefined;
-//             const lock = self.lock.acquire();
-//                 if (self.free_connections.pop()) |c| {
-//                     conn = c;
-//                 } else {
-//                     const c = try allocator.create(Connection);
-//                     c.server_conn = try allocator.create(HttpServerConnection);
-//                     c.frame = try allocator.create(@Frame(startServing));
-//                     conn = try self.active_connections.createNode(c, allocator);
-//                 }
-//             self.active_connections.append(conn);
-//             lock.release();
-//
-//             conn.data.address = client.address;
-//             conn.data.file = client.file;
-            const server_conn = try allocator.create(HttpServerConnection);
-            const frame = try allocator.create(@Frame(Application.startServing));
-            //try self.frames.append(frame);
-            var e = try self.connections.put(server_conn, frame);
+
+            const lock = self.lock.acquire();
+                var context: *Context = undefined;
+                var frame: *@Frame(startServing) = undefined;
+                var it = self.free_connections.iterator();
+                if (it.next()) |entry| {
+                    context = entry.key;
+                    frame = entry.value;
+                    const r = self.free_connections.remove(entry.key);
+                } else {
+                    context = try allocator.create(Context);
+                    frame = try allocator.create(@Frame(startServing));
+                }
+                const e = try self.used_connections.put(context, frame);
+            lock.release();
+
+            //conn.file = client.file;
+            //conn.address = client.address;
+
 
             // Spawn the async stuff
             if (comptime std.io.is_async) {
-                frame.* = async self.startServing(conn, server_conn);
+                frame.* = async self.startServing(conn, context);
             } else {
-                try self.startServing(conn, server_conn);
+                try self.startServing(conn, context);
             }
         }
     }
@@ -1186,27 +658,35 @@ pub const Application = struct {
     // Handling
     // ------------------------------------------------------------------------
     fn startServing(self: *Application, conn: net.StreamServer.Connection,
-                    server_conn: *HttpServerConnection) !void {
-        //const conn = storage.data;
+                    context: *Context) !void {
+        const server_conn = &context.server_conn;
+        const buffer = &context.buffer;
+        std.debug.warn("Start serving {}\n", .{conn.file.handle});
 
         // Bulild the connection
         server_conn.* = HttpServerConnection{
-            .io = IOStream.init(conn.file),
-            //.buffer = std.heap.FixedBufferAllocator.init(&buffer),
+            .buffer = std.heap.FixedBufferAllocator.init(buffer),
+            .file = conn.file,
             .address = conn.address,
             .application = self,
         };
 
         // Send it
         server_conn.startRequestLoop() catch |err| {
-            //std.debug.warn("{} {}\n", .{conn.address, err});
-            return err; // TODO: Catch and log
+            std.debug.warn("Error {} {}\n", .{conn.file.handle, err});
+            switch (err) {
+                error.ConnectionResetByPeer => {}, // Ignore
+                else => return err,
+            }
         };
+
+        std.debug.warn("Done serving {}\n", .{conn.file.handle});
 
          // Free the connection and set the frame to be cleaned up later
          var lock = self.lock.acquire();
-         //self.free_connections.append(storage);
-         //self.active_connections.remove(storage);
+            if (self.used_connections.remove(context)) |e| {
+                const r = try self.free_connections.put(context, e.value);
+            }
          lock.release();
     }
 
@@ -1242,7 +722,7 @@ pub const Application = struct {
         // Add server headers
         try response.headers.put("Server", "ZHP/0.1");
         try response.headers.put("Date",
-            try HttpHeaders.formatDate(server_conn.allocator, time.milliTimestamp()));
+            try util.formatDate(server_conn.allocator, time.milliTimestamp()));
 
         var it = self.middleware.iterator();
         while (it.next()) |middleware| {
@@ -1256,7 +736,8 @@ pub const Application = struct {
 
     pub fn deinit(self: *Application) void {
         self.server.deinit();
-        //self.connections.deinit();
+        self.free_connections.deinit();
+        self.used_connections.deinit();
         self.middleware.deinit();
     }
 
