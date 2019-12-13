@@ -85,7 +85,8 @@ pub const IOStream = struct {
     }
 
     pub fn reinit(self: *Self, file: File) void {
-        self.file = file;
+        self.in_file = file;
+        self.out_file = file;
         self._in_start_index = buffer_size;
         self._in_end_index = buffer_size;
         self._out_index = 0;
@@ -548,7 +549,7 @@ test "string-array-map" {
     try map.append("query", "b");
     try map.append("query", "c");
     const query = map.get("query").?;
-    testing.expect(query.count() == 3);
+    testing.expect(query.len == 3);
     testing.expect(mem.eql(u8, query.items[0], "a"));
 
     map.deinit();

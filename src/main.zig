@@ -60,11 +60,6 @@ const ErrorTestHandler = struct {
 
 
 pub fn main() anyerror!void {
-    //std.event.Loop.instance.?.beginOneEvent();
-    //var memory: [1024*1024]u8 = undefined;
-    //var allocator = &std.heap.FixedBufferAllocator.init(memory[0..]).allocator;
-
-    //var allocator = &std.heap.ArenaAllocator.init(std.heap.page_allocator).allocator;
     var routes = [_]web.Route{
         web.Route.create("home", "/", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),

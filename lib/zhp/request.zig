@@ -86,13 +86,13 @@ pub const HttpRequest = struct {
 
     // Parse using default sizes
     pub fn parse(self: *HttpRequest, stream: *IOStream) !usize {
-        var timer = try std.time.Timer.start();
+        //var timer = try std.time.Timer.start();
         var n = try self.parseRequestLine(stream, 2048);
-        std.debug.warn("    parseRequestLine took: {}ns\n", .{timer.lap()});
+        //std.debug.warn("    parseRequestLine took: {}ns\n", .{timer.lap()});
         n += try self.parseHeaders(stream, 32*1024);
-        std.debug.warn("    parseHeaders took: {}ns\n", .{timer.lap()});
+        //std.debug.warn("    parseHeaders took: {}ns\n", .{timer.lap()});
         try self.parseContentLength(100*1024*1024);
-        std.debug.warn("    parseContentLength took: {}ns\n", .{timer.lap()});
+        //std.debug.warn("    parseContentLength took: {}ns\n", .{timer.lap()});
         return n;
     }
 
@@ -108,9 +108,7 @@ pub const HttpRequest = struct {
 
         // FIXME: If the whole method is not in the initial read
         // buffer this bails out
-        var timer = try std.time.Timer.start();
         var ch: u8 = try stream.readByte();
-        std.debug.warn("      readFirstByte took: {}ns\n", .{timer.lap()});
 
         // Skip any leading CRLFs
         while (stream.readCount() < max_size) {
@@ -483,7 +481,7 @@ test "parse-request-headers" {
     var n = try request.parse(&stream);
     var h = &request.headers;
 
-    testing.expectEqual(@as(usize, 6), h.items.count());
+    testing.expectEqual(@as(usize, 6), h.items.len);
 
     testing.expectEqualSlices(u8, "server", try h.get("Host"));
     testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00",
@@ -504,7 +502,7 @@ test "parse-request-headers" {
     n = try request.parse(&stream);
     h = &request.headers;
 
-    testing.expectEqual(@as(usize, 9), h.items.count());
+    testing.expectEqual(@as(usize, 9), h.items.len);
 
     testing.expectEqualSlices(u8, "www.kittyhell.com", try h.get("Host"));
     testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9",

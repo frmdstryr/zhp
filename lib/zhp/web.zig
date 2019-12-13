@@ -43,7 +43,7 @@ pub const HttpServerConnection = struct {
         defer self.connectionLost();
         self.allocator = &self.buffer.allocator;
         self.io = try IOStream.initCapacity(
-            self.allocator, self.file, mem.page_size);
+                self.allocator, self.file, mem.page_size);
         const app = self.application;
         const params = &app.options;
         const stream = &self.io;
@@ -85,11 +85,11 @@ pub const HttpServerConnection = struct {
                 else => return err,
             };
             //defer request.deinit();
-            std.debug.warn("readRequest took: {}ns\n", .{timer.lap()});
+            //std.debug.warn("readRequest took: {}ns\n", .{timer.lap()});
 
             const keep_alive = self.canKeepAlive(request);
             var response = try self.buildResponse(request);
-            std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
+            //std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
 
             var factory = try app.processRequest(self, request, response);
             if (factory != null) {
@@ -121,13 +121,13 @@ pub const HttpServerConnection = struct {
                  };
             }
             try app.processResponse(self, response);
-            std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
+            //std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
 
             // TODO: Write in chunks
             if (self.closed) return;
             try self.sendResponse(response);
             if (self.closed or !keep_alive) return;
-            std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
+            //std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
             //std.debug.warn("[{}] {} {} in {}ns\n", .{
             //    self.address, request.method, request.path,
             //    timer.lap()});
@@ -143,15 +143,12 @@ pub const HttpServerConnection = struct {
     // Read a new request from the stream
     // this does not read the body of the request.
     pub fn readRequest(self: *HttpServerConnection) !*HttpRequest {
-        var timer = try std.time.Timer.start();
         const request = try self.allocator.create(HttpRequest);
         const stream = &self.io;//.file.inStream().stream;
         const params = &self.application.options;
         const timeout = params.header_timeout * 1000; // ms to ns
         request.* = try HttpRequest.initCapacity(self.allocator, 4096, 32);
-        std.debug.warn("  createRequest took: {}ns\n", .{timer.lap()});
         const n = try request.parse(stream);
-        std.debug.warn("  parseRequest took: {}ns\n", .{timer.lap()});
         return request;
     }
 
@@ -644,33 +641,40 @@ pub const Application = struct {
         const allocator = self.allocator;
 
         while (true) {
-            //const arena = ArenaAllocator.init(allocator);
             const conn = try self.server.accept();
+//
+//             const lock = self.lock.acquire();
+//                 var context: *Context = undefined;
+//                 var frame: *@Frame(startServing) = undefined;
+//                 var it = self.free_connections.iterator();
+//                 if (it.next()) |entry| {
+//                     context = entry.key;
+//                     frame = entry.value;
+//
+//                     const r = self.free_connections.remove(entry.key);
+//                 } else {
+//                     context = try allocator.create(Context);
+//                     context.server_conn = HttpServerConnection{
+//                         .buffer = std.heap.FixedBufferAllocator.init(
+//                             &context.buffer),
+//                         .application = self,
+//                         .address = conn.address,
+//                         .file = conn.file,
+//                         .io = try IOStream.initCapacity(
+//                             allocator, conn.file, mem.page_size),
+//                     };
+//
+//                 }
+//                 const e = try self.used_connections.put(context, frame);
+//             lock.release();
 
-            const lock = self.lock.acquire();
-                var context: *Context = undefined;
-                var frame: *@Frame(startServing) = undefined;
-                var it = self.free_connections.iterator();
-                if (it.next()) |entry| {
-                    context = entry.key;
-                    frame = entry.value;
-                    const r = self.free_connections.remove(entry.key);
-                } else {
-                    context = try allocator.create(Context);
-                    frame = try allocator.create(@Frame(startServing));
-                }
-                const e = try self.used_connections.put(context, frame);
-            lock.release();
-
-            //conn.file = client.file;
-            //conn.address = client.address;
-
+            const frame = try allocator.create(@Frame(startServing));
 
             // Spawn the async stuff
             if (comptime std.io.is_async) {
-                frame.* = async self.startServing(conn, context);
+                frame.* = async self.startServing(conn);
             } else {
-                try self.startServing(conn, context);
+                try self.startServing(conn);
             }
         }
     }
@@ -678,19 +682,25 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Handling
     // ------------------------------------------------------------------------
-    fn startServing(self: *Application, conn: net.StreamServer.Connection,
-                    context: *Context) !void {
-        const server_conn = &context.server_conn;
-        const buffer = &context.buffer;
+    fn startServing(self: *Application, conn: net.StreamServer.Connection) !void {
+        //const server_conn = &context.server_conn;
+        var buffer: [1024*1024]u8 = undefined;
+        var server_conn = HttpServerConnection{
+            .buffer = std.heap.FixedBufferAllocator.init(&buffer),
+            .application = self,
+            .address = conn.address,
+            .file = conn.file,
+        };
+        //const buffer = &context.buffer;
         //std.debug.warn("Start serving {}\n", .{conn.file.handle});
 
         // Bulild the connection
-        server_conn.* = HttpServerConnection{
-            .buffer = std.heap.FixedBufferAllocator.init(buffer),
-            .file = conn.file,
-            .address = conn.address,
-            .application = self,
-        };
+//         server_conn.* = HttpServerConnection{
+//             .buffer = std.heap.FixedBufferAllocator.init(buffer),
+//             .file = conn.file,
+//             .address = conn.address,
+//             .application = self,
+//         };
 
         // Send it
         server_conn.startRequestLoop() catch |err| {
@@ -704,11 +714,11 @@ pub const Application = struct {
         //std.debug.warn("Done serving {}\n", .{conn.file.handle});
 
         // Free the connection and set the frame to be cleaned up later
-        var lock = self.lock.acquire();
-            if (self.used_connections.remove(context)) |e| {
-                const r = try self.free_connections.put(context, e.value);
-            }
-        lock.release();
+        //var lock = self.lock.acquire();
+        //    if (self.used_connections.remove(context)) |e| {
+        //        const r = try self.free_connections.put(context, e.value);
+        //    }
+        //lock.release();
     }
 
     // ------------------------------------------------------------------------
@@ -716,8 +726,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     pub fn processRequest(self: *Application, server_conn: *HttpServerConnection,
                         request: *HttpRequest, response: *HttpResponse) !?Handler {
-        var it = self.middleware.iterator();
-        while (it.next()) |middleware| {
+        for (self.middleware.toSlice()) |middleware| {
             var done = try middleware.processRequest(
                 middleware, request, response);
             if (done) return null;
@@ -745,8 +754,7 @@ pub const Application = struct {
         try response.headers.put("Date",
             try util.formatDate(server_conn.allocator, time.milliTimestamp()));
 
-        var it = self.middleware.iterator();
-        while (it.next()) |middleware| {
+        for (self.middleware.toSlice()) |middleware| {
             try middleware.processResponse(middleware, response);
         }
 
