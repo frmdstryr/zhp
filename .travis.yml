@@ -29,4 +29,4 @@ before_install:
     - zig build
 
 script:
-    - zig test --Drelease-fast=true lib/zhp/request.zig
+    - zig test --release-fast lib/zhp/request.zig
