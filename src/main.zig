@@ -8,7 +8,7 @@ const MainHandler = struct {
 
     pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "text/plain");
-        try response.body.append("Hello, World!");
+        try response.stream.write("Hello, World!");
     }
 
 };

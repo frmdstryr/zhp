@@ -14,7 +14,7 @@ pub const IOStream = struct {
     pub const buffer_size = mem.page_size;
     pub const WriteError = File.WriteError;
     pub const ReadError = File.ReadError;
-
+    allocator: *Allocator,
     _in_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
     _in_end_index: usize = 0,
@@ -39,29 +39,37 @@ pub const IOStream = struct {
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, file: File, capacity: usize) !IOStream {
+    pub fn initCapacity(allocator: *Allocator, file: File,
+                        in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
+            .allocator = allocator,
             .in_file = file,
             .out_file = file,
-            ._in_buffer = try allocator.alloc(u8, capacity),
-            ._out_buffer = try allocator.alloc(u8, capacity),
-            ._in_start_index = capacity,
-            ._in_end_index = capacity,
+            ._in_buffer = try allocator.alloc(u8, in_capacity),
+            ._out_buffer = try allocator.alloc(u8, out_capacity),
+            ._in_start_index = in_capacity,
+            ._in_end_index = in_capacity,
         };
+    }
+
+    pub fn deinit(self: *IOStream) void {
+        self.allocator.free(self._in_buffer);
+        self.allocator.free(self._out_buffer);
     }
 
     // ------------------------------------------------------------------------
     // Testing utilities
     // ------------------------------------------------------------------------
-    pub fn initStdIo() IOStream {
-        return IOStream{
-            .in_file = std.io.getStdIn(),
-            .out_file = std.io.getStdOut(),
-        };
-    }
+//     pub fn initStdIo() IOStream {
+//         return IOStream{
+//             .in_file = std.io.getStdIn(),
+//             .out_file = std.io.getStdOut(),
+//         };
+//     }
 
     pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
+            .allocator = allocator,
             .in_file = try File.openRead("/dev/null"),
             .out_file = try File.openWrite("/dev/null"),
             ._in_buffer = try mem.dupe(allocator, u8, in_buffer),
@@ -424,11 +432,11 @@ pub const IOStream = struct {
             self._out_buffer[self._out_index] = bytes[0];
             self._out_index += 1;
             if (self._out_index == buffer_size) {
-                try self.flush();
+                try self.flushFn();
             }
             return;
         } else if (bytes.len >= buffer_size) {
-            try self.flush();
+            try self.flushFn();
             return self.out_file.write(bytes);
         }
         var src_index: usize = 0;
@@ -440,10 +448,15 @@ pub const IOStream = struct {
             self._out_index += copy_amt;
             assert(self._out_index <= buffer_size);
             if (self._out_index == buffer_size) {
-                try self.flush();
+                try self.flushFn();
             }
             src_index += copy_amt;
         }
+    }
+
+    fn flushFn(self: *Self) !void {
+        try self.out_file.write(self._out_buffer[0..self._out_index]);
+        self._out_index = 0;
     }
 
     pub fn write(self: *Self, bytes: []const u8) !void {
@@ -456,8 +469,12 @@ pub const IOStream = struct {
     }
 
     pub fn flush(self: *Self) !void {
-        try self.out_file.write(self._out_buffer[0..self._out_index]);
-        self._out_index = 0;
+        if (comptime std.io.is_async) {
+            var f = async self.flushFn();
+            return await f;
+        } else {
+            return self.flushFn();
+        }
     }
 
     pub fn writeByte(self: *Self, byte: u8) !void {

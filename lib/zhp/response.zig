@@ -7,13 +7,16 @@ const HttpHeaders = @import("headers.zig").HttpHeaders;
 const HttpRequest = @import("request.zig").HttpRequest;
 
 
+pub const Bytes = std.ArrayList(u8);
+
+
 pub const HttpResponse = struct {
     request: *HttpRequest,
     headers: HttpHeaders,
     status: HttpStatus = responses.OK,
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
-    body: std.Buffer,
+    body: Bytes,
     stream: std.io.BufferOutStream.Stream = std.io.BufferOutStream.Stream{
         .writeFn = HttpResponse.writeFn
     },
@@ -25,14 +28,24 @@ pub const HttpResponse = struct {
         return HttpResponse{
             .request = request,
             .headers = try HttpHeaders.initCapacity(allocator, max_headers),
-            .body = try std.Buffer.initCapacity(allocator, buffer_size),
+            .body = try Bytes.initCapacity(allocator, buffer_size),
         };
+    }
+
+    pub fn reset(self: *HttpResponse) void {
+        self.body.len = 0;
+        self.headers.reset();
+        self.status = responses.OK;
+        self.disconnect_on_finish = false;
+        self.chunking_output = false;
+        self._write_finished = false;
+        self._finished = false;
     }
 
     // Wri
     pub fn writeFn(out_stream: *std.io.BufferOutStream.Stream, bytes: []const u8) !void {
         const self = @fieldParentPtr(HttpResponse, "stream", out_stream);
-        return self.body.append(bytes);
+        return self.body.appendSlice(bytes);
     }
 
 

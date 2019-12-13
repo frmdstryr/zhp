@@ -8,7 +8,7 @@ pub const ServerErrorHandler = struct {
 
     pub fn dispatch(self: *ServerErrorHandler, response: *web.HttpResponse) anyerror!void {
         response.status = responses.INTERNAL_SERVER_ERROR;
-        try response.body.replaceContents("");
+        try response.body.resize(0);
 
         if (@errorReturnTrace()) |trace| {
             try response.stream.write("<h1>Server Error</h1>");
@@ -25,7 +25,7 @@ pub const ServerErrorHandler = struct {
                 false);
             try response.stream.write("</pre>");
         } else {
-            try response.body.append("<h1>Server Error</h1>");
+            try response.stream.write("<h1>Server Error</h1>");
         }
     }
 

@@ -18,8 +18,8 @@ const handlers = @import("handlers.zig");
 
 const HttpHeaders = @import("headers.zig").HttpHeaders;
 const HttpStatus = responses.HttpStatus;
-const util = @import("util.zig");
-const IOStream = util.IOStream;
+pub const util = @import("util.zig");
+pub const IOStream = util.IOStream;
 
 pub const HttpRequest = @import("request.zig").HttpRequest;
 pub const HttpResponse = @import("response.zig").HttpResponse;
@@ -31,26 +31,38 @@ pub const HttpResponse = @import("response.zig").HttpResponse;
 // the connection is reused to process futher requests.
 pub const HttpServerConnection = struct {
     application: *Application,
+    storage: [1024*1024]u8 = undefined,
     buffer: std.heap.FixedBufferAllocator,
     allocator: *Allocator = undefined,
-    file: fs.File,
-    io: IOStream = undefined,
-    address: net.Address,
+    io: IOStream,
+    address: net.Address = undefined,
     closed: bool = false,
+    const Frame = @Frame(startRequestLoop);
+    frame: *Frame,
 
     // Handles a connection
-    pub fn startRequestLoop(self: *HttpServerConnection) !void {
-        defer self.connectionLost();
+    pub fn startRequestLoop(self: *HttpServerConnection,
+                            conn: net.StreamServer.Connection) !void {
+        self.address = conn.address;
+        self.closed = false;
         self.allocator = &self.buffer.allocator;
-        self.io = try IOStream.initCapacity(
-                self.allocator, self.file, mem.page_size);
         const app = self.application;
         const params = &app.options;
         const stream = &self.io;
+        stream.reinit(conn.file);
+        defer self.connectionLost();
+
+        var request = try HttpRequest.initCapacity(self.allocator, 4096, 32);
+        var response = try HttpResponse.initCapacity(self.allocator,
+            &request, mem.page_size, 10);
+
         var timer = try time.Timer.start();
         while (true) {
             defer self.buffer.reset();
-            var request = self.readRequest() catch |err| switch (err) {
+            defer request.reset();
+            defer response.reset();
+
+            const n = request.parse(stream) catch |err| switch (err) {
                 error.BadRequest => {
                     try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
                     self.loseConnection();
@@ -77,7 +89,7 @@ pub const HttpServerConnection = struct {
                     return;
                 },
                 //error.TimeoutError,
-                //error.ConnectionResetByPeer,
+                error.ConnectionResetByPeer,
                 error.EndOfStream => {
                     self.loseConnection();
                     return;
@@ -87,21 +99,25 @@ pub const HttpServerConnection = struct {
             //defer request.deinit();
             //std.debug.warn("readRequest took: {}ns\n", .{timer.lap()});
 
-            const keep_alive = self.canKeepAlive(request);
-            var response = try self.buildResponse(request);
+            const keep_alive = self.canKeepAlive(&request);
             //std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
 
-            var factory = try app.processRequest(self, request, response);
+            var factory = try app.processRequest(self, &request, &response);
             if (factory != null) {
-                self.readBody(request, response) catch |err| switch(err) {
+                self.readBody(&request, &response) catch |err| switch(err) {
                     error.BadRequest,
-                    error.ImproperlyTerminatedChunk,
-                    error.BodyTooLong => {
+                    error.ImproperlyTerminatedChunk => {
                         try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
                         self.loseConnection();
                         return;
                     },
-                    //error.TimeoutError,
+                    error.RequestEntityTooLarge => {
+                        try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
+                        self.loseConnection();
+                        return;
+                    },
+                    // error.TimeoutError,
+                    error.ConnectionResetByPeer,
                     error.EndOfStream => {
                         self.loseConnection();
                         return;
@@ -110,22 +126,22 @@ pub const HttpServerConnection = struct {
                         return err;
                     }
                 };
-                var handler = try self.buildHandler(factory.?, response);
+                var handler = try self.buildHandler(factory.?, &response);
                 //defer handler.deinit();
                 handler.execute() catch |err| {
                      var error_handler = try self.buildHandler(
-                        app.error_handler, response);
+                        app.error_handler, &response);
                      //defer error_handler.deinit();
                      try error_handler.execute();
 
                  };
             }
-            try app.processResponse(self, response);
+            try app.processResponse(self, &response);
             //std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
 
             // TODO: Write in chunks
             if (self.closed) return;
-            try self.sendResponse(response);
+            try self.sendResponse(&response);
             if (self.closed or !keep_alive) return;
             //std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
             //std.debug.warn("[{}] {} {} in {}ns\n", .{
@@ -140,25 +156,6 @@ pub const HttpServerConnection = struct {
         return factory(self.allocator, self.application, response);
     }
 
-    // Read a new request from the stream
-    // this does not read the body of the request.
-    pub fn readRequest(self: *HttpServerConnection) !*HttpRequest {
-        const request = try self.allocator.create(HttpRequest);
-        const stream = &self.io;//.file.inStream().stream;
-        const params = &self.application.options;
-        const timeout = params.header_timeout * 1000; // ms to ns
-        request.* = try HttpRequest.initCapacity(self.allocator, 4096, 32);
-        const n = try request.parse(stream);
-        return request;
-    }
-
-    pub fn buildResponse(self: *HttpServerConnection,
-                     request: *HttpRequest) !*HttpResponse {
-        const response = try self.allocator.create(HttpResponse);
-        response.* = try HttpResponse.initCapacity(self.allocator,
-            request, mem.page_size, 10);
-        return response;
-    }
 
     fn readBody(self: *HttpServerConnection, request: *HttpRequest,
                 response: *HttpResponse) !void {
@@ -166,12 +163,6 @@ pub const HttpServerConnection = struct {
         const content_length = request.content_length;
         var headers = &request.headers;
         const code = response.status.code;
-
-        if (request.content_length > params.max_body_size) {
-            //std.debug.warn("Content length {} is too long {}", .{
-            //    request.content_length, params.max_body_size});
-            return error.BodyTooLong;
-        }
 
         if (headers.eqlIgnoreCase("Expect", "100-continue")) {
             response.status = responses.CONTINUE;
@@ -193,9 +184,7 @@ pub const HttpServerConnection = struct {
             try self.readFixedBody(request);
         } else if (headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
             try self.readChunkedBody(request);
-        } // else if (self.is_client) {
-        //    return self.readBodyUntilClose(request);
-        //}
+        }
         request._read_finished = true;
     }
 
@@ -204,9 +193,8 @@ pub const HttpServerConnection = struct {
         var buf = try std.Buffer.initSize(self.allocator, params.chunk_size);
         defer buf.deinit();
 
-        const stream = &self.io;//&self.io.file.inStream().stream;
+        const stream = &self.io;
         var left = request.content_length;
-        const expiry = params.body_timeout * 1000; // ms to ns
         //var timer = try time.Timer.start();
 
         while (left > 0) {
@@ -217,7 +205,7 @@ pub const HttpServerConnection = struct {
             try request.dataReceived(buf.toSlice());
 
             // FIXME: This is a syscall per byte
-            //if (timer.read() >= expiry) return error.TimeoutError;
+            //if (timer.read() >= params.body_timeout) return error.TimeoutError;
         }
     }
 
@@ -227,7 +215,6 @@ pub const HttpServerConnection = struct {
         var total_size: u32 = 0;
 
         const params = &self.application.options;
-        const expiry = params.body_timeout * 1000; // ms to ns
 
         const chunk_size = params.chunk_size;
         var buf = try std.Buffer.initCapacity(self.allocator, chunk_size);
@@ -250,7 +237,7 @@ pub const HttpServerConnection = struct {
             total_size += chunk_len;
             if (total_size > params.max_body_size) {
                 // Chunked body too large
-                return error.BodyTooLong;
+                return error.RequestEntityTooLarge;
             }
 
             var bytes_to_read: u32 = chunk_len;
@@ -260,7 +247,7 @@ pub const HttpServerConnection = struct {
                 bytes_to_read -= @intCast(u32, buf.len());
                 try request.dataReceived(buf.toSlice());
                     // FIXME: This is a syscall per byte
-                //if (timer.read() >= expiry) return error.TimeoutError;
+                //if (timer.read() >= params.body_timeout) return error.TimeoutError;
             }
 
             // Chunk ends with \r\n
@@ -268,7 +255,7 @@ pub const HttpServerConnection = struct {
             if (!mem.eql(u8, buf.toSlice(), "\r\n")) {
                 return error.ImproperlyTerminatedChunk;
             }
-            //if (timer.read() >= expiry) return error.TimeoutError;
+            //if (timer.read() >= params.body_timeout) return error.TimeoutError;
         }
     }
 
@@ -326,7 +313,7 @@ pub const HttpServerConnection = struct {
 
         // Send content length if missing otherwise the client hangs reading
         if (!response.headers.contains("Content-Length")) {
-            try stream.print("Content-Length: {}\n\n", .{response.body.len()});
+            try stream.print("Content-Length: {}\n\n", .{response.body.len});
         }
 
         // Write body
@@ -335,7 +322,7 @@ pub const HttpServerConnection = struct {
             // TODO
 
             try stream.write("0\r\n\r\n");
-        } else if (response.body.len() > 0) {
+        } else if (response.body.len > 0) {
             try stream.write(response.body.toSlice());
         }
 
@@ -362,6 +349,10 @@ pub const HttpServerConnection = struct {
         if (!self.closed) {
             self.loseConnection();
         }
+        const app = self.application;
+        const lock = app.lock.acquire();
+            app.connection_pool.release(self);
+        lock.release();
     }
 
 };
@@ -560,23 +551,50 @@ const Middleware = struct {
 };
 
 
+pub const ConnectionPool = struct {
+    allocator: *Allocator,
+    pub const ConnectionList = std.ArrayList(*HttpServerConnection);
+    connections: ConnectionList,
+
+    pub fn init(allocator: *Allocator) ConnectionPool {
+        return ConnectionPool{
+            .allocator = allocator,
+            .connections = ConnectionList.init(allocator),
+        };
+    }
+
+    // Pop the last released buffer or create a new one
+    pub fn get(self: *ConnectionPool) ?*HttpServerConnection {
+        return self.connections.popOrNull();
+    }
+
+    pub fn create(self: *ConnectionPool) !*HttpServerConnection {
+        try self.connections.ensureCapacity(self.connections.len + 1);
+        return self.allocator.create(HttpServerConnection);
+    }
+
+    pub fn release(self: *ConnectionPool, conn: *HttpServerConnection) void {
+        return self.connections.appendAssumeCapacity(conn);
+    }
+
+    pub fn deinit(self: *ConnectionPool) void {
+        while (self.connections.popOrNull()) |conn| {
+            self.allocator.destroy(conn);
+        }
+    }
+
+};
+
+
 pub const Application = struct {
     allocator: *Allocator,
     router: Router,
     server: net.StreamServer,
     lock: std.Mutex,
-
-
-    pub const Context = struct {
-        // This is the max memory allowed per request
-        buffer: [1024*1024]u8 = undefined,
-        server_conn: HttpServerConnection,
-    };
-    const ConnectionMap = std.AutoHashMap(*Context, *@Frame(startServing));
-
-    used_connections: ConnectionMap,
-    free_connections: ConnectionMap,
-
+    //const Frame = @Frame(startServing);
+    //const FrameList = std.ArrayList(*Frame);
+    //frames: FrameList,
+    connection_pool: ConnectionPool,
     middleware: std.ArrayList(*Middleware),
 
 
@@ -603,7 +621,7 @@ pub const Application = struct {
         // Timeout in millis
         idle_connection_timeout: u32 = 300 * time.ms_per_s,  // 5 min
         header_timeout: u32 = 300 * time.ms_per_s,  // 5 min
-        body_timeout: u32 = 900 * time.ms_per_s, // 15 minn
+        body_timeout: u32 = 900 * time.ms_per_s, // 15 min
         max_body_size: u64 = 100*1000*1000, // 100 MB
 
         // List of trusted downstream (ie proxy) servers
@@ -623,9 +641,8 @@ pub const Application = struct {
             .options = options,
             .server = net.StreamServer.init(options.server_options),
             .lock = std.Mutex.init(),
-            .used_connections = ConnectionMap.init(allocator),
-            .free_connections = ConnectionMap.init(allocator),
             .middleware = std.ArrayList(*Middleware).init(allocator),
+            .connection_pool = ConnectionPool.init(allocator),
         };
     }
 
@@ -642,83 +659,32 @@ pub const Application = struct {
 
         while (true) {
             const conn = try self.server.accept();
-//
-//             const lock = self.lock.acquire();
-//                 var context: *Context = undefined;
-//                 var frame: *@Frame(startServing) = undefined;
-//                 var it = self.free_connections.iterator();
-//                 if (it.next()) |entry| {
-//                     context = entry.key;
-//                     frame = entry.value;
-//
-//                     const r = self.free_connections.remove(entry.key);
-//                 } else {
-//                     context = try allocator.create(Context);
-//                     context.server_conn = HttpServerConnection{
-//                         .buffer = std.heap.FixedBufferAllocator.init(
-//                             &context.buffer),
-//                         .application = self,
-//                         .address = conn.address,
-//                         .file = conn.file,
-//                         .io = try IOStream.initCapacity(
-//                             allocator, conn.file, mem.page_size),
-//                     };
-//
-//                 }
-//                 const e = try self.used_connections.put(context, frame);
-//             lock.release();
 
-            const frame = try allocator.create(@Frame(startServing));
+            // Grab a frame
+            const lock = self.lock.acquire();
+                var server_conn: *HttpServerConnection = undefined;
+                if (self.connection_pool.get()) |c| {
+                    server_conn = c;
+                } else {
+                    server_conn = try self.connection_pool.create();
+                    server_conn.* = HttpServerConnection{
+                        .application = self,
+                        .buffer = std.heap.FixedBufferAllocator.init(
+                            &server_conn.storage),
+                        .io = try IOStream.initCapacity(
+                            allocator, conn.file, 0, mem.page_size),
+                        .frame = try allocator.create(HttpServerConnection.Frame)
+                    };
+                }
+            lock.release();
 
-            // Spawn the async stuff
-            if (comptime std.io.is_async) {
-                frame.* = async self.startServing(conn);
+            // Start processing requests
+            if (std.io.is_async) {
+                server_conn.frame.* = async server_conn.startRequestLoop(conn);
             } else {
-                try self.startServing(conn);
+                try server_conn.startRequestLoop(conn);
             }
         }
-    }
-
-    // ------------------------------------------------------------------------
-    // Handling
-    // ------------------------------------------------------------------------
-    fn startServing(self: *Application, conn: net.StreamServer.Connection) !void {
-        //const server_conn = &context.server_conn;
-        var buffer: [1024*1024]u8 = undefined;
-        var server_conn = HttpServerConnection{
-            .buffer = std.heap.FixedBufferAllocator.init(&buffer),
-            .application = self,
-            .address = conn.address,
-            .file = conn.file,
-        };
-        //const buffer = &context.buffer;
-        //std.debug.warn("Start serving {}\n", .{conn.file.handle});
-
-        // Bulild the connection
-//         server_conn.* = HttpServerConnection{
-//             .buffer = std.heap.FixedBufferAllocator.init(buffer),
-//             .file = conn.file,
-//             .address = conn.address,
-//             .application = self,
-//         };
-
-        // Send it
-        server_conn.startRequestLoop() catch |err| {
-            //std.debug.warn("Error {} {}\n", .{conn.file.handle, err});
-            switch (err) {
-                error.ConnectionResetByPeer => {}, // Ignore
-                else => return err,
-            }
-        };
-
-        //std.debug.warn("Done serving {}\n", .{conn.file.handle});
-
-        // Free the connection and set the frame to be cleaned up later
-        //var lock = self.lock.acquire();
-        //    if (self.used_connections.remove(context)) |e| {
-        //        const r = try self.free_connections.put(context, e.value);
-        //    }
-        //lock.release();
     }
 
     // ------------------------------------------------------------------------
@@ -757,16 +723,11 @@ pub const Application = struct {
         for (self.middleware.toSlice()) |middleware| {
             try middleware.processResponse(middleware, response);
         }
-
-        //std.debug.warn("[{}] {} {} {}\n", server_conn.address,
-        //    response.request.method, response.request.path,
-        //    response.status.code);
     }
 
     pub fn deinit(self: *Application) void {
         self.server.deinit();
-        self.free_connections.deinit();
-        self.used_connections.deinit();
+        self.connection_pool.deinit();
         self.middleware.deinit();
     }
 
