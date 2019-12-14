@@ -60,12 +60,14 @@ const ErrorTestHandler = struct {
 
 
 pub fn main() anyerror!void {
-    var routes = [_]web.Route{
+
+    const routes = [_]web.Route{
         web.Route.create("home", "/", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
     };
+
     var app = web.Application.init(.{
         //.allocator=allocator,
         .routes=routes[0..],

@@ -40,6 +40,7 @@ pub const HttpServerConnection = struct {
     const Frame = @Frame(startRequestLoop);
     frame: *Frame,
 
+
     // Handles a connection
     pub fn startRequestLoop(self: *HttpServerConnection,
                             conn: net.StreamServer.Connection) !void {
@@ -102,8 +103,8 @@ pub const HttpServerConnection = struct {
             const keep_alive = self.canKeepAlive(&request);
             //std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
 
-            var factory = try app.processRequest(self, &request, &response);
-            if (factory != null) {
+            const factoryFn = try app.processRequest(self, &request, &response);
+            if (factoryFn) |factory| {
                 self.readBody(&request, &response) catch |err| switch(err) {
                     error.BadRequest,
                     error.ImproperlyTerminatedChunk => {
@@ -126,15 +127,16 @@ pub const HttpServerConnection = struct {
                         return err;
                     }
                 };
-                var handler = try self.buildHandler(factory.?, &response);
-                //defer handler.deinit();
-                handler.execute() catch |err| {
-                     var error_handler = try self.buildHandler(
-                        app.error_handler, &response);
-                     //defer error_handler.deinit();
-                     try error_handler.execute();
 
-                 };
+                var handler = try self.buildHandler(factory, &response);
+                handler.execute() catch |err| {
+                    handler.deinit();
+                    var error_handler = try self.buildHandler(
+                        app.error_handler, &response);
+                    defer error_handler.deinit();
+                    try error_handler.execute();
+                };
+                //handler.deinit();
             }
             try app.processResponse(self, &response);
             //std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
@@ -153,7 +155,13 @@ pub const HttpServerConnection = struct {
     // Build the request handler to generate a response
     fn buildHandler(self: *HttpServerConnection, factory: Handler,
                     response: *HttpResponse) !*RequestHandler {
-        return factory(self.allocator, self.application, response);
+        if (std.io.is_async) {
+            var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {},
+                factory, self.allocator, self.application, response);
+        } else {
+            return factory(self.allocator, self.application, response);
+        }
     }
 
 
@@ -364,38 +372,59 @@ pub const RequestHandler = struct {
     request: *HttpRequest,
     response: *HttpResponse,
 
-    const request_handler = fn(self: *RequestHandler) anyerror!void;
+    const request_handler = if (std.io.is_async)
+            // FIXME: This does not work
+            fn(self: *RequestHandler) anyerror!void
+        else
+            fn(self: *RequestHandler) anyerror!void;
 
     pub fn execute(self: *RequestHandler) !void {
-        return self.dispatch(self);
+        if (std.io.is_async) {
+            var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, self.dispatch, self);
+        } else {
+            try self.dispatch(self);
+        }
     }
 
-    // Dispatches to the other handlers
-    fn default_dispatch(self: *RequestHandler) !void {
-        const handler = switch (self.request.method) {
+    // Dispatches to the other handlers for now this can't be modified
+    pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
+        const handler: request_handler = switch (self.request.method) {
             .Get => self.get,
-            .Post => self.post,
             .Put => self.put,
+            .Post => self.post,
             .Patch => self.patch,
             .Head => self.head,
             .Delete => self.delete,
             .Options => self.options,
-            else => _unimplemented
+            else => RequestHandler.defaultHandler,
         };
-        return handler(self);
+        if (std.io.is_async) {
+            // Give a good chunk to the handler
+            var stack_frame: [100*1024]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, handler, self);
+        } else {
+            return handler(self);
+        }
+    }
+
+    // Default handler request implementation
+    pub fn defaultHandler(self: *RequestHandler) anyerror!void {
+        self.response.status = responses.METHOD_NOT_ALLOWED;
+        return error.HttpError;
     }
 
     // Generic dispatch to handle
-    dispatch: request_handler = default_dispatch,
+    dispatch: request_handler = defaultDispatch,
 
     // Default handlers
-    head: request_handler = _unimplemented,
-    get: request_handler = _unimplemented,
-    post: request_handler = _unimplemented,
-    delete: request_handler = _unimplemented,
-    patch: request_handler = _unimplemented,
-    put: request_handler = _unimplemented,
-    options: request_handler = _unimplemented,
+    head: request_handler = defaultHandler,
+    get: request_handler = defaultHandler,
+    post: request_handler = defaultHandler,
+    delete: request_handler = defaultHandler,
+    patch: request_handler = defaultHandler,
+    put: request_handler = defaultHandler,
+    options: request_handler = defaultHandler,
 
     // Deinit
     pub fn deinit(self: *RequestHandler) void {
@@ -405,16 +434,10 @@ pub const RequestHandler = struct {
 
 };
 
-// Default handler request implementation
-fn _unimplemented(self: *RequestHandler) !void {
-    self.response.status = responses.METHOD_NOT_ALLOWED;
-    return error.HttpError;
-}
-
 
 // A handler is simply a a factory function which returns a RequestHandler
 pub const Handler = fn(allocator: *Allocator, app: *Application,
-                       response: *HttpResponse) anyerror!*RequestHandler;
+                       response: *HttpResponse) error{OutOfMemory}!*RequestHandler;
 
 // This seems a bit excessive....
 pub fn createHandler(comptime T: type) Handler {
@@ -424,28 +447,22 @@ pub fn createHandler(comptime T: type) Handler {
         pub fn create(allocator: *Allocator, app: *Application,
                       response: *HttpResponse) !*RequestHandler {
             const self = try allocator.create(T); // Create a dangling pointer lol
+            comptime const defaultDispatch = RequestHandler.defaultDispatch;
+            comptime const defaultHandler = RequestHandler.defaultHandler;
             self.* = T{
                 .handler = RequestHandler{
                     .application = app,
                     .allocator = allocator,
                     .request = response.request,
                     .response = response,
-                    .dispatch = if (@hasDecl(T, "dispatch"))
-                        Self.dispatch else RequestHandler.default_dispatch,
-                    .head = if (@hasDecl(T, "head"))
-                        Self.head else _unimplemented,
-                    .get = if (@hasDecl(T, "get"))
-                        Self.get else _unimplemented,
-                    .post = if (@hasDecl(T, "post"))
-                        Self.post else _unimplemented,
-                    .delete = if (@hasDecl(T, "delete"))
-                        Self.delete else _unimplemented,
-                    .patch = if (@hasDecl(T, "patch"))
-                        Self.patch else _unimplemented,
-                    .put = if (@hasDecl(T, "put"))
-                        Self.put else _unimplemented,
-                    .options = if (@hasDecl(T, "options"))
-                        Self.options else _unimplemented,
+                    .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
+                    .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
+                    .get = if (@hasDecl(T, "get")) Self.get else defaultHandler,
+                    .post = if (@hasDecl(T, "post")) Self.post else defaultHandler,
+                    .delete = if (@hasDecl(T, "delete")) Self.delete else defaultHandler,
+                    .patch = if (@hasDecl(T, "patch")) Self.patch else defaultHandler,
+                    .put = if (@hasDecl(T, "put")) Self.put else defaultHandler,
+                    .options = if (@hasDecl(T, "options")) Self.options else defaultHandler,
                     .destroy = Self.destroy,
                 },
             };
@@ -543,10 +560,31 @@ pub const Router = struct {
 };
 
 const Middleware = struct {
+    stack_frame: []align(std.Target.stack_align) u8,
+
     // Process the request and return the reponse
-    processRequest: fn(self: *Middleware,
+    pub fn processRequest(self: *Middleware, request: *HttpRequest,
+                          response: *HttpResponse) !bool {
+        if (std.io.is_async) {
+            return await @asyncCall(self.stack_frame, {},
+                self.processRequestFn, self, request, response);
+        } else {
+            return self.processRequestFn(self, request, response);
+        }
+    }
+
+    pub fn processResponse(self: *Middleware, response: *HttpResponse) !void {
+        if (std.io.is_async) {
+            return await @asyncCall(self.stack_frame, {},
+                self.processResponseFn, self, response);
+        } else {
+            try self.processResponseFn(self, response);
+        }
+    }
+
+    processRequestFn: fn(self: *Middleware,
         request: *HttpRequest, response: *HttpResponse) anyerror!bool,
-    processResponse: fn(self: *Middleware,
+    processResponseFn: fn(self: *Middleware,
         response: *HttpResponse) anyerror!void,
 };
 
@@ -693,8 +731,7 @@ pub const Application = struct {
     pub fn processRequest(self: *Application, server_conn: *HttpServerConnection,
                         request: *HttpRequest, response: *HttpResponse) !?Handler {
         for (self.middleware.toSlice()) |middleware| {
-            var done = try middleware.processRequest(
-                middleware, request, response);
+            var done = try middleware.processRequest(request, response);
             if (done) return null;
         }
 
@@ -721,7 +758,7 @@ pub const Application = struct {
             try util.formatDate(server_conn.allocator, time.milliTimestamp()));
 
         for (self.middleware.toSlice()) |middleware| {
-            try middleware.processResponse(middleware, response);
+            try middleware.processResponse(response);
         }
     }
 
