@@ -20,7 +20,7 @@ inline fn isCtrlChar(ch: u8) bool {
 }
 
 inline fn isTokenChar(ch: u8) bool {
-    return HttpHeaders.token_map[ch] == 0;
+    return HttpHeaders.token_map[ch] == 1;
 }
 
 pub const Bytes = std.ArrayList(u8);
@@ -187,7 +187,7 @@ pub const HttpRequest = struct {
         }
 
         // Check separator
-        ch = try stream.readByte();
+        ch = try stream.readByteFast();
         if (ch != ' ') return error.BadRequest;
 
         // TODO: Validate the path
@@ -245,7 +245,7 @@ pub const HttpRequest = struct {
         // Strip any whitespace
         while (headers.items.len < headers.items.capacity()) {
             // TODO: This assumes that the whole header in the buffer
-            ch = try stream.readByte();
+            ch = try stream.readByteFast();
 
             switch (ch) {
                 '\r' => {
@@ -269,7 +269,7 @@ pub const HttpRequest = struct {
                             //key = buf.toSlice()[index..];
                             key = buf.toSlice()[index..stream.readCount()-1];
                             break;
-                        } else if (isTokenChar(ch)) {
+                        } else if (!isTokenChar(ch)) {
                             return error.BadRequest;
                         }
                         //try buf.append(ch);
