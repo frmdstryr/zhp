@@ -48,7 +48,6 @@ pub const HttpResponse = struct {
         return self.body.appendSlice(bytes);
     }
 
-
     pub fn deinit(self: *HttpResponse) void {
         self.headers.deinit();
         self.request.deinit();
