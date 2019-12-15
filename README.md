@@ -2,6 +2,42 @@
 
 [![Build Status](https://travis-ci.org/frmdstryr/zhp.svg?branch=master)](https://travis-ci.org/frmdstryr/zhp)
 
-A Http server written in Zig aka "ZHP".  It uses a zero-copy parser.
+A Http server written in [Zig](https://ziglang.org/).  It uses a zero-copy parser that
+benchmarks around ~800MB/s per thread (compare to [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http).
+
+It's a work in progress... feel free to contribute!
 
 
+### Example
+
+```zig
+const std = @import("std");
+const web = @import("zhp").web;
+
+pub const io_mode = .evented;
+
+const MainHandler = struct {
+    handler: web.RequestHandler,
+
+    pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
+        try response.headers.put("Content-Type", "text/plain");
+        try response.stream.write("Hello, World!");
+    }
+
+};
+
+
+pub fn main() anyerror!void {
+    const routes = [_]web.Route{
+        web.Route.create("home", "/", MainHandler),
+    };
+
+    var app = web.Application.init(.{
+        .routes=routes[0..],
+    });
+    defer app.deinit();
+    try app.listen("127.0.0.1", 9000);
+    try app.start();
+}
+
+```
