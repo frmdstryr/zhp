@@ -1,32 +1,25 @@
 language: cpp
 dist: bionic
+services:
+    - docker
+
 before_install:
-    # Install zig dependencies
-    #- sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-    #- wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-    #- sudo apt-add-repository -y 'deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-9 main'
-    #- sudo apt-get remove -y llvm-*
-    #- sudo apt-get install -y libxml2-dev libclang-9-dev llvm-9 llvm-9-dev cmake s3cmd gcc-7 g++-7 qemu
-
-    # Install zig
-    #- export CC=gcc-7
-    #- export CXX=g++-7
-    #- git clone https://github.com/ziglang/zig
-    #- cd zig
-    #- mkdir build
-    #- cd build
-    #- cmake .. -DCMAKE_BUILD_TYPE=Release
-    #- make -j2 install
-    #- export PATH="/home/travis/build/frmdstryr/zhp/zig/build/bin:$PATH"
-
     # Install zig
     - sudo snap install zig --classic --edge
 
     # Make sure zig runs
     - zig --help
 
+    # Pull wrk
+    - docker pull williamyeh/wrk
+    - docker run --rm williamyeh/wrk --version
+
     # Make sure this repo builds
     - zig build
 
 script:
+    # Test request parser
     - zig test --release-fast lib/zhp/request.zig
+
+    # Test example server
+    - zig run tests/bench.zig

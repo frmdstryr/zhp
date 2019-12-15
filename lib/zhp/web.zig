@@ -372,12 +372,16 @@ pub const RequestHandler = struct {
     request: *HttpRequest,
     response: *HttpResponse,
 
+    // Request handler signature
     const request_handler = if (std.io.is_async)
             // FIXME: This does not work
             fn(self: *RequestHandler) anyerror!void
         else
             fn(self: *RequestHandler) anyerror!void;
 
+    // Execute the request handler by running the dispatch function
+    // By default the dispatch function calls the method matching
+    // the request method
     pub fn execute(self: *RequestHandler) !void {
         if (std.io.is_async) {
             var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
@@ -387,7 +391,8 @@ pub const RequestHandler = struct {
         }
     }
 
-    // Dispatches to the other handlers for now this can't be modified
+    // Dispatches to the other handlers based on the parsed request method
+    // This can be replaced with a custom handler if necessary
     pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
         const handler: request_handler = switch (self.request.method) {
             .Get => self.get,

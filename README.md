@@ -1,5 +1,5 @@
 # ZHP
 
-An experimental Http server written in Zig aka "ZHP".
+A Http server written in Zig aka "ZHP".  It uses a zero-copy parser.
 
-This is a based on python's tornado web framework.
+
