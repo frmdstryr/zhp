@@ -14,7 +14,7 @@ before_install:
     - docker pull williamyeh/wrk
 
     # Make sure this repo builds
-    - zig build
+    - zig build -Drelease-fast=true install
 
 script:
     # Test request parser
