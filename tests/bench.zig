@@ -6,7 +6,7 @@ const server_cmd = [_][]const u8{
 };
 
 const wrk_cmd = [_][]const u8{
-    "docker", "run", "--rm", "williamyeh/wrk"
+    "docker", "run", "--rm", "williamyeh/wrk",
     "-t2", "-c100", "-d30s", "--timeout 2s", "http://127.0.0.1:9000/"
 };
 
