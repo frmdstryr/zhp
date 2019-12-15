@@ -12,7 +12,6 @@ before_install:
 
     # Pull wrk
     - docker pull williamyeh/wrk
-    - docker run --rm williamyeh/wrk --version
 
     # Make sure this repo builds
     - zig build
