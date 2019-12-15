@@ -7,7 +7,7 @@ const server_cmd = [_][]const u8{
 
 const wrk_cmd = [_][]const u8{
     "docker", "run", "--rm", "williamyeh/wrk",
-    "-t2", "-c100", "-d30s", "--timeout 2s", "http://127.0.0.1:9000/"
+    "-t2", "-c100", "-d30s", "--latency", "http://127.0.0.1:9000/"
 };
 
 pub fn main() anyerror!void {
@@ -20,11 +20,6 @@ pub fn main() anyerror!void {
     defer wrk_process.deinit();
     try wrk_process.spawn();
 
-    defer waitIgnore(server_process);
-    defer waitIgnore(wrk_process);
-}
-
-
-pub fn waitIgnore(process: *std.ChildProcess) void {
-    var term = process.wait() catch unreachable;
+    var r = wrk_process.wait();
+    r = server_process.wait();
 }
