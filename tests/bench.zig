@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const server_cmd = [_][]const u8{
-    "timeout", "-s", "SIGINT", "45s",
+    "timeout", "-s", "SIGINT", "60s",
     "bash", "-c", "zig build -Drelease-fast=true run",
 };
 
@@ -15,6 +15,9 @@ pub fn main() anyerror!void {
     var server_process = try std.ChildProcess.init(server_cmd[0..], allocator);
     defer server_process.deinit();
     try server_process.spawn();
+
+    // Wait for it to build
+    std.time.sleep(20*std.time.ns_per_s);
 
     var wrk_process = try std.ChildProcess.init(wrk_cmd[0..], allocator);
     defer wrk_process.deinit();
