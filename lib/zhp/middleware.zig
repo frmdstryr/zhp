@@ -1,10 +1,34 @@
+const std = @import("std");
 const web = @import("web.zig");
 
-const ProxyMiddleware = struct {
 
-    pub fn process(middleware: *web.Middleware, request: *web.HttpRequest) !web.HttpResponse {
-        var response = middleware.process(request);
-        return response;
+
+pub const Middleware = struct {
+    stack_frame: []align(std.Target.stack_align) u8,
+
+    // Process the request and return the reponse
+    pub fn processRequest(self: *Middleware, request: *web.HttpRequest,
+                          response: *web.HttpResponse) !bool {
+        if (std.io.is_async) {
+            return await @asyncCall(self.stack_frame, {},
+                self.processRequestFn, self, request, response);
+        } else {
+            return self.processRequestFn(self, request, response);
+        }
     }
 
-}
+    pub fn processResponse(self: *Middleware, response: *web.HttpResponse) !void {
+        if (std.io.is_async) {
+            return await @asyncCall(self.stack_frame, {},
+                self.processResponseFn, self, response);
+        } else {
+            try self.processResponseFn(self, response);
+        }
+    }
+
+    processRequestFn: fn(self: *Middleware,
+        request: *web.HttpRequest, response: *web.HttpResponse) anyerror!bool,
+    processResponseFn: fn(self: *Middleware,
+        response: *web.HttpResponse) anyerror!void,
+};
+

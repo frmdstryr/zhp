@@ -47,7 +47,7 @@ pub const HttpRequest = struct {
     version: Version = .Unknown,
     path: []const u8 = "",
     content_length: usize = 0,
-    _read_finished: bool = false,
+    read_finished: bool = false,
     headers: HttpHeaders,
 
     // Holds path and headers
@@ -79,20 +79,16 @@ pub const HttpRequest = struct {
         self.body = "";
         self.version = .Unknown;
         self.content_length = 0;
-        self._read_finished = false;
+        self.read_finished = false;
         self.headers.reset();
         self.buffer.len = 0;
     }
 
     // Parse using default sizes
     pub fn parse(self: *HttpRequest, stream: *IOStream) !usize {
-        //var timer = try std.time.Timer.start();
         var n = try self.parseRequestLine(stream, 2048);
-        //std.debug.warn("    parseRequestLine took: {}ns\n", .{timer.lap()});
         n += try self.parseHeaders(stream, 32*1024);
-        //std.debug.warn("    parseHeaders took: {}ns\n", .{timer.lap()});
         try self.parseContentLength(100*1024*1024);
-        //std.debug.warn("    parseContentLength took: {}ns\n", .{timer.lap()});
         return n;
     }
 
@@ -104,7 +100,6 @@ pub const HttpRequest = struct {
         try self.buffer.resize(max_size);
         const buf = &self.buffer;
         stream.swapBuffer(buf.toSlice());
-        //self.buffer.len = 0;
 
         // FIXME: If the whole method is not in the initial read
         // buffer this bails out
@@ -180,10 +175,7 @@ pub const HttpRequest = struct {
                 self.method = Method.Options;
 
             },
-            else => {
-                //std.debug.warn("Unexpected method: {c}", .{ch});
-                return error.MethodNotAllowed;
-            }
+            else => return error.MethodNotAllowed,
         }
 
         // Check separator
@@ -197,17 +189,15 @@ pub const HttpRequest = struct {
         const index = stream.readCount();
         while (stream.readCount() < max_size) {
             ch = try stream.readByteFast();
-            if (ch == ' ') {
-                //self.path = buf.toSlice()[index..];
-                self.path = buf.toSlice()[index..stream.readCount()-1];
-                break;
-            } else if (!isPrintableAscii(ch)) {
+            if (!ascii.isGraph(ch)) {
+                if (ch == ' ') break;
                 return error.BadRequest;
             }
-            //buf.appendAssumeCapacity(ch); // We checked capacity already
         }
-        if (self.path.len == 0) return error.BadRequest;
         if (stream.readCount() == max_size) return error.RequestUriTooLong; // Too Big
+
+        self.path = buf.toSlice()[index..stream.readCount()-1];
+        if (self.path.len == 0) return error.BadRequest;
 
         // Read version
         inline for("HTTP/1.") |expected| {
@@ -265,16 +255,13 @@ pub const HttpRequest = struct {
 
                     // Read Key
                     while (stream.readCount() < max_size) {
-                        if (ch == ':') {
-                            //key = buf.toSlice()[index..];
-                            key = buf.toSlice()[index..stream.readCount()-1];
-                            break;
-                        } else if (!isTokenChar(ch)) {
-                            return error.BadRequest;
-                        }
-                        //try buf.append(ch);
+                        if (ch == ':') break;
+                        if (!isTokenChar(ch)) return error.BadRequest;
                         ch = try stream.readByteFast();
                     }
+
+                    // Header name
+                    key = buf.toSlice()[index..stream.readCount()-1];
 
                     // Strip whitespace
                     while (stream.readCount() < max_size) {
@@ -285,13 +272,9 @@ pub const HttpRequest = struct {
             }
 
             // Read value
-            //index = buf.len;
             index = stream.readCount()-1;
             while (stream.readCount() < max_size) {
-                if (!isPrintableAscii(ch)) {
-                    if (isCtrlChar(ch)) break;
-                }
-                //try buf.append(ch);
+                if (!ascii.isPrint(ch) and isCtrlChar(ch)) break;
                 ch = try stream.readByteFast();
             }
 
@@ -299,11 +282,9 @@ pub const HttpRequest = struct {
             value = buf.toSlice()[index..stream.readCount()-1];
             //value = buf.toSlice()[index..buf.len];
 
-            // Ignore
+            // Ignore any remaining non-print characters
             while (stream.readCount() < max_size) {
-                if (!isPrintableAscii(ch)) {
-                    if (isCtrlChar(ch)) break;
-                }
+                if (!ascii.isPrint(ch) and isCtrlChar(ch)) break;
                 ch = try stream.readByteFast();
             }
 
@@ -401,13 +382,14 @@ test "parse-request-line" {
     const allocator = &fba.allocator;
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try HttpRequest.init(allocator);
-    request.buffer = Bytes.fromOwnedSlice(allocator, stream._in_buffer);
+    request.buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer);
 
     var n = try request.parse(&stream);
     testing.expectEqual(request.method, HttpRequest.Method.Get);
     testing.expectEqual(request.version, HttpRequest.Version.Http1_1);
     testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
+
 }
 
 test "bench-parse-request-line" {
@@ -417,7 +399,7 @@ test "bench-parse-request-line" {
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
 
     var request = try HttpRequest.init(allocator);
-    request.buffer = Bytes.fromOwnedSlice(allocator, stream._in_buffer);
+    request.buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer);
 
     const requests: usize = 1000000;
     var n: usize = 0;
@@ -476,7 +458,7 @@ test "parse-request-headers" {
         \\
     );
     var request = try HttpRequest.init(allocator);
-    request.buffer = Bytes.fromOwnedSlice(allocator, stream._in_buffer);
+    request.buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer);
 
     var n = try request.parse(&stream);
     var h = &request.headers;
@@ -498,7 +480,7 @@ test "parse-request-headers" {
     // Next
     try stream.load(allocator, TEST_GET_1);
     request.reset();
-    request.buffer = Bytes.fromOwnedSlice(allocator, stream._in_buffer);
+    request.buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer);
     n = try request.parse(&stream);
     h = &request.headers;
 
@@ -534,7 +516,7 @@ test "bench-parse-request-headers" {
 
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try HttpRequest.init(allocator);
-    request.buffer = Bytes.fromOwnedSlice(allocator, stream._in_buffer);
+    request.buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer);
 
     const requests: usize = 1000000;
     var n: usize = 0;

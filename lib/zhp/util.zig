@@ -8,35 +8,35 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Buffer = std.Buffer;
 
-const Datetime = @import("time/calendar.zig").Datetime;
-
 
 pub const IOStream = struct {
-    pub const buffer_size = mem.page_size;
     pub const WriteError = File.WriteError;
     pub const ReadError = File.ReadError;
     allocator: *Allocator,
-    _in_buffer: []u8 = undefined,
+    in_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
     _in_end_index: usize = 0,
     _in_count: usize = 0,
     _out_count: usize = 0,
-    _out_buffer: []u8 = undefined,
+    out_buffer: []u8 = undefined,
     _out_index: usize = 0,
     closed: bool = false,
-
-    _test_buffer: []u8 = undefined,
+    unbuffered: bool = false,
 
     const Self = @This();
     in_file: File,
     out_file: File,
 
+    // ------------------------------------------------------------------------
+    // Constructors
+    // ------------------------------------------------------------------------
+
     pub fn init(file: File) IOStream {
         return IOStream{
             .in_file = file,
             .out_file = file,
-            ._in_buffer = &[_]u8{},
-            ._out_buffer = &[_]u8{},
+            .in_buffer = &[_]u8{},
+            .out_buffer = &[_]u8{},
         };
     }
 
@@ -46,34 +46,22 @@ pub const IOStream = struct {
             .allocator = allocator,
             .in_file = file,
             .out_file = file,
-            ._in_buffer = try allocator.alloc(u8, in_capacity),
-            ._out_buffer = try allocator.alloc(u8, out_capacity),
+            .in_buffer = try allocator.alloc(u8, in_capacity),
+            .out_buffer = try allocator.alloc(u8, out_capacity),
             ._in_start_index = in_capacity,
             ._in_end_index = in_capacity,
         };
     }
 
-    pub fn deinit(self: *IOStream) void {
-        self.allocator.free(self._in_buffer);
-        self.allocator.free(self._out_buffer);
-    }
-
     // ------------------------------------------------------------------------
     // Testing utilities
     // ------------------------------------------------------------------------
-//     pub fn initStdIo() IOStream {
-//         return IOStream{
-//             .in_file = std.io.getStdIn(),
-//             .out_file = std.io.getStdOut(),
-//         };
-//     }
-
     pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
             .allocator = allocator,
             .in_file = try File.openRead("/dev/null"),
             .out_file = try File.openWrite("/dev/null"),
-            ._in_buffer = try mem.dupe(allocator, u8, in_buffer),
+            .in_buffer = try mem.dupe(allocator, u8, in_buffer),
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
         };
@@ -81,7 +69,7 @@ pub const IOStream = struct {
 
     // Load into the in buffer for testing purposes
     pub fn load(self: *Self, allocator: *Allocator, in_buffer: []const u8) !void {
-        self._in_buffer = try mem.dupe(allocator, u8, in_buffer);
+        self.in_buffer = try mem.dupe(allocator, u8, in_buffer);
         self._in_start_index = 0;
         self._in_end_index = in_buffer.len;
     }
@@ -91,19 +79,26 @@ pub const IOStream = struct {
         self._in_count = 0;
         self._out_count = 0;
         self.closed = false;
+        self.unbuffered = false;
     }
 
+    // Reset the the initial state without reallocating
     pub fn reinit(self: *Self, file: File) void {
         self.in_file = file;
         self.out_file = file;
-        self._in_start_index = buffer_size;
-        self._in_end_index = buffer_size;
+        self._in_start_index = self.in_buffer.len;
+        self._in_end_index = self.in_buffer.len;
+        self._in_count = 0;
         self._out_index = 0;
+        self._out_count = 0;
+        self.closed = false;
+        self.unbuffered = false;
     }
 
     // Swap the current buffer with a new buffer copying any unread bytes
     // into the new buffer
     pub fn swapBuffer(self: *Self, buffer: []u8) void {
+        //const left = self.amountBuffered();
         if (builtin.is_test) {
             self._in_start_index = 0;
             self._in_end_index = buffer.len;
@@ -113,24 +108,33 @@ pub const IOStream = struct {
         }
 
         // TODO: Don't toss previous bytes
-        self._in_buffer = buffer; // Set it right away
+        self.in_buffer = buffer; // Set it right away
         self._in_start_index = buffer.len;
         self._in_end_index = buffer.len;
-        //const n = try self.read(buffer[0..]);
-        //self._in_start_index = 0;
-        //self._in_end_index = n;
         self._in_count = 0;
+        self.unbuffered = false;
+    }
+
+    // Switch between buffered and unbuffered reads
+    pub fn readUnbuffered(self: *Self, unbuffered: bool) void {
+        self.unbuffered = unbuffered;
     }
 
     // ------------------------------------------------------------------------
     // InStream
     // ------------------------------------------------------------------------
+    // Return the amount of bytes waiting in the input buffer
+    pub inline fn amountBuffered(self: *Self) usize {
+        return self._in_end_index-self._in_start_index;
+    }
+
     fn readFn(self: *Self, dest: []u8) !usize {
         //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
+        if (self.unbuffered) return try self.in_file.read(dest);
 
         // Hot path for one byte reads
         if (dest.len == 1 and self._in_end_index > self._in_start_index) {
-            dest[0] = self._in_buffer[self._in_start_index];
+            dest[0] = self.in_buffer[self._in_start_index];
             self._in_start_index += 1;
             return 1;
         }
@@ -141,9 +145,9 @@ pub const IOStream = struct {
             if (dest_space == 0) {
                 return dest_index;
             }
-            const amt_buffered = self._in_end_index - self._in_start_index;
+            const amt_buffered = self.amountBuffered();
             if (amt_buffered == 0) {
-                assert(self._in_end_index <= self._in_buffer.len);
+                assert(self._in_end_index <= self.in_buffer.len);
                 // Make sure the last read actually gave us some data
                 if (self._in_end_index == 0) {
                     // reading from the unbuffered stream returned nothing
@@ -151,14 +155,14 @@ pub const IOStream = struct {
                     return dest_index;
                 }
                 // we can read more data from the unbuffered stream
-                if (dest_space < self._in_buffer.len) {
+                if (dest_space < self.in_buffer.len) {
                     self._in_start_index = 0;
-                    self._in_end_index = try self.in_file.read(self._in_buffer[0..]);
+                    self._in_end_index = try self.in_file.read(self.in_buffer[0..]);
                     self._in_count += self._in_end_index;
 
                     // Shortcut
                     if (self._in_end_index >= dest_space) {
-                        mem.copy(u8, dest[dest_index..], self._in_buffer[0..dest_space]);
+                        mem.copy(u8, dest[dest_index..], self.in_buffer[0..dest_space]);
                         self._in_start_index = dest_space;
                         return dest.len;
                     }
@@ -173,7 +177,7 @@ pub const IOStream = struct {
 
             const copy_amount = math.min(dest_space, amt_buffered);
             const copy_end_index = self._in_start_index + copy_amount;
-            mem.copy(u8, dest[dest_index..], self._in_buffer[self._in_start_index..copy_end_index]);
+            mem.copy(u8, dest[dest_index..], self.in_buffer[self._in_start_index..copy_end_index]);
             self._in_start_index = copy_end_index;
             dest_index += copy_amount;
         }
@@ -323,11 +327,11 @@ pub const IOStream = struct {
         if (self._in_end_index == self._in_start_index) {
             // Do a direct read into the input buffer
             self._in_end_index = try self.read(
-                self._in_buffer[0..self._in_buffer.len]);
+                self.in_buffer[0..self.in_buffer.len]);
             self._in_start_index = 0;
             if (self._in_end_index < 1) return error.EndOfStream;
         }
-        const c = self._in_buffer[self._in_start_index];
+        const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
         return c;
     }
@@ -336,7 +340,7 @@ pub const IOStream = struct {
         if (self._in_end_index == self._in_start_index) {
             return error.EndOfBuffer;
         }
-        const c = self._in_buffer[self._in_start_index];
+        const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
         return c;
     }
@@ -430,25 +434,25 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     fn writeFn(self: *Self, bytes: []const u8) !void {
         if (bytes.len == 1) {
-            self._out_buffer[self._out_index] = bytes[0];
+            self.out_buffer[self._out_index] = bytes[0];
             self._out_index += 1;
-            if (self._out_index == buffer_size) {
+            if (self._out_index == self.out_buffer.len) {
                 try self.flushFn();
             }
             return;
-        } else if (bytes.len >= buffer_size) {
+        } else if (bytes.len >= self.out_buffer.len) {
             try self.flushFn();
             return self.out_file.write(bytes);
         }
         var src_index: usize = 0;
 
         while (src_index < bytes.len) {
-            const dest_space_left = buffer_size - self._out_index;
+            const dest_space_left = self.out_buffer.len - self._out_index;
             const copy_amt = math.min(dest_space_left, bytes.len - src_index);
-            mem.copy(u8, self._out_buffer[self._out_index..], bytes[src_index .. src_index + copy_amt]);
+            mem.copy(u8, self.out_buffer[self._out_index..], bytes[src_index .. src_index + copy_amt]);
             self._out_index += copy_amt;
-            assert(self._out_index <= buffer_size);
-            if (self._out_index == buffer_size) {
+            assert(self._out_index <= self.out_buffer.len);
+            if (self._out_index == self.out_buffer.len) {
                 try self.flushFn();
             }
             src_index += copy_amt;
@@ -456,7 +460,7 @@ pub const IOStream = struct {
     }
 
     fn flushFn(self: *Self) !void {
-        try self.out_file.write(self._out_buffer[0..self._out_index]);
+        try self.out_file.write(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
     }
 
@@ -476,6 +480,23 @@ pub const IOStream = struct {
         } else {
             return self.flushFn();
         }
+    }
+
+    // Read directly into the output buffer then flush it out
+    pub fn writeFromInStream(self: *Self, in_stream: *std.io.InStream(ReadError)) !usize {
+        var total_wrote: usize = 0;
+        if (self._out_index != 0) {
+            total_wrote += self._out_index;
+            try self.flush();
+        }
+
+        while (true) {
+            self._out_index = try in_stream.read(self.out_buffer);
+            if (self._out_index == 0) break;
+            total_wrote += self._out_index;
+            try self.flush();
+        }
+        return total_wrote;
     }
 
     pub fn writeByte(self: *Self, byte: u8) !void {
@@ -499,21 +520,12 @@ pub const IOStream = struct {
         }
     }
 
+    pub fn deinit(self: *IOStream) void {
+        if (!self.closed) self.close();
+        self.allocator.free(self.in_buffer);
+        self.allocator.free(self.out_buffer);
+    }
+
 };
 
 
-// Formats a timestamp in the format used by HTTP.
-    // eg "Tue, 15 Nov 1994 08:12:31 GMT"
-pub fn formatDate(allocator: *Allocator, timestamp: u64) ![]const u8 {
-    const d = Datetime.fromTimestamp(timestamp);
-    return try std.fmt.allocPrint(allocator, "{}, {} {} {} {}:{}:{} {}", .{
-        d.date.weekdayName()[0..3],
-        d.date.day,
-        d.date.monthName()[0..3],
-        d.date.year,
-        d.time.hour,
-        d.time.minute,
-        d.time.second,
-        d.time.zone.name
-    });
-}

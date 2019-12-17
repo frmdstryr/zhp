@@ -8,13 +8,15 @@ const ascii = std.ascii;
 const time = std.time;
 const meta = std.meta;
 const testing = std.testing;
+const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-//const re = @import("re/regex.zig").Regex;
+
 const responses = @import("status.zig");
 const handlers = @import("handlers.zig");
+const Datetime = @import("time/calendar.zig").Datetime;
 
 const HttpHeaders = @import("headers.zig").HttpHeaders;
 const HttpStatus = responses.HttpStatus;
@@ -23,7 +25,7 @@ pub const IOStream = util.IOStream;
 
 pub const HttpRequest = @import("request.zig").HttpRequest;
 pub const HttpResponse = @import("response.zig").HttpResponse;
-
+pub const Middleware = @import("middleware.zig").Middleware;
 
 
 // A single client connection
@@ -57,7 +59,8 @@ pub const HttpServerConnection = struct {
         var response = try HttpResponse.initCapacity(self.allocator,
             &request, mem.page_size, 10);
 
-        var timer = try time.Timer.start();
+        // Start serving requests
+        // TODO: This doesn't support pipelining
         while (true) {
             defer self.buffer.reset();
             defer request.reset();
@@ -97,17 +100,14 @@ pub const HttpServerConnection = struct {
                 },
                 else => return err,
             };
-            //defer request.deinit();
-            //std.debug.warn("readRequest took: {}ns\n", .{timer.lap()});
 
             const keep_alive = self.canKeepAlive(&request);
-            //std.debug.warn("buildResponse took: {}ns\n", .{timer.lap()});
 
             const factoryFn = try app.processRequest(self, &request, &response);
             if (factoryFn) |factory| {
                 self.readBody(&request, &response) catch |err| switch(err) {
-                    error.BadRequest,
-                    error.ImproperlyTerminatedChunk => {
+                    //error.ImproperlyTerminatedChunk,
+                    error.BadRequest => {
                         try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
                         self.loseConnection();
                         return;
@@ -123,9 +123,7 @@ pub const HttpServerConnection = struct {
                         self.loseConnection();
                         return;
                     },
-                    else => {
-                        return err;
-                    }
+                    else => return err,
                 };
 
                 var handler = try self.buildHandler(factory, &response);
@@ -139,10 +137,13 @@ pub const HttpServerConnection = struct {
                 //handler.deinit();
             }
             try app.processResponse(self, &response);
-            //std.debug.warn("processResponse took: {}ns\n", .{timer.lap()});
 
             // TODO: Write in chunks
             if (self.closed) return;
+
+            // Request handler already sent the response
+            if (response.finished) continue;
+
             try self.sendResponse(&response);
             if (self.closed or !keep_alive) return;
             //std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
@@ -153,14 +154,14 @@ pub const HttpServerConnection = struct {
     }
 
     // Build the request handler to generate a response
-    fn buildHandler(self: *HttpServerConnection, factory: Handler,
+    fn buildHandler(self: *HttpServerConnection, factoryFn: Handler,
                     response: *HttpResponse) !*RequestHandler {
         if (std.io.is_async) {
-            var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [10*1024]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {},
-                factory, self.allocator, self.application, response);
+                factoryFn, self.allocator, self.application, response);
         } else {
-            return factory(self.allocator, self.application, response);
+            return factoryFn(self.allocator, self.application, response);
         }
     }
 
@@ -188,90 +189,36 @@ pub const HttpServerConnection = struct {
             return;
         }
 
+        // FIXME: There needs to be some limit here
         if (content_length > 0) {
+            if (content_length > params.max_body_size) {
+                return error.RequestEntityTooLarge;
+            }
             try self.readFixedBody(request);
-        } else if (headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
-            try self.readChunkedBody(request);
         }
-        request._read_finished = true;
+        //} else if (headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
+        //    try self.readChunkedBody(request);
+        //}
+        request.read_finished = true;
     }
 
     fn readFixedBody(self: *HttpServerConnection, request: *HttpRequest) !void {
         const params = &self.application.options;
-        var buf = try std.Buffer.initSize(self.allocator, params.chunk_size);
-        defer buf.deinit();
-
         const stream = &self.io;
-        var left = request.content_length;
-        //var timer = try time.Timer.start();
 
-        while (left > 0) {
-            try stream.readAllBuffer(
-                &buf, math.min(params.chunk_size, left));
+        // The parser stops reading at the index of the end of the headers
+        const end_of_headers = request.buffer.len;
 
-            left -= @intCast(u32, buf.len());
-            try request.dataReceived(buf.toSlice());
+        // Resize the buffer to fit the rest
+        try request.buffer.resize(request.content_length + end_of_headers);
 
-            // FIXME: This is a syscall per byte
-            //if (timer.read() >= params.body_timeout) return error.TimeoutError;
-        }
-    }
-
-    fn readChunkedBody(self: *HttpServerConnection, request: *HttpRequest) !void {
-        // TODO: "chunk extensions" http://tools.ietf.org/html/rfc2616#section-3.6.1
-        const stream = &self.io;//&self.io.file.inStream().stream;
-        var total_size: u32 = 0;
-
-        const params = &self.application.options;
-
-        const chunk_size = params.chunk_size;
-        var buf = try std.Buffer.initCapacity(self.allocator, chunk_size);
-        defer buf.deinit();
-
-        //var timer = try time.Timer.start();
-        while (true) {
-            try stream.readUntilDelimiterBuffer(&buf, '\n', 64);
-            const chunk_len = try std.fmt.parseInt(
-                u32, mem.trim(u8, buf.toSlice(), " \r\n"), 16);
-            if (chunk_len == 0) {
-                try stream.readUntilDelimiterBuffer(&buf, '\n', 2);
-                if (!mem.eql(u8, buf.toSlice(), "\r\n")) {
-                    // Improperly terminated chunked request
-                    return error.ImproperlyTerminatedChunk;
-                }
-                return;
-            }
-
-            total_size += chunk_len;
-            if (total_size > params.max_body_size) {
-                // Chunked body too large
-                return error.RequestEntityTooLarge;
-            }
-
-            var bytes_to_read: u32 = chunk_len;
-            while (bytes_to_read > 0) {
-                try stream.readAllBuffer
-                    (&buf, math.min(bytes_to_read, chunk_size));
-                bytes_to_read -= @intCast(u32, buf.len());
-                try request.dataReceived(buf.toSlice());
-                    // FIXME: This is a syscall per byte
-                //if (timer.read() >= params.body_timeout) return error.TimeoutError;
-            }
-
-            // Chunk ends with \r\n
-            try stream.readUntilDelimiterBuffer(&buf, '\n', 2);
-            if (!mem.eql(u8, buf.toSlice(), "\r\n")) {
-                return error.ImproperlyTerminatedChunk;
-            }
-            //if (timer.read() >= params.body_timeout) return error.TimeoutError;
-        }
-    }
-
-    fn readBodyUntilClose(self: *HttpServerConnection, request: *HttpRequest) !void {
-        const stream = &self.io;
-        const body = try stream.readAllAlloc(
-            self.allocator, self.application.options.max_body_size);
-        try request.dataReceived(body);
+        // Switch the stream to unbuffered mode and read directly to the request
+        // buffer
+        var body = request.buffer.toSlice()[end_of_headers..];
+        stream.readUnbuffered(true);
+        defer stream.readUnbuffered(false);
+        try stream.readNoEof(body);
+        request.body = body;
     }
 
     fn canKeepAlive(self: *HttpServerConnection, request: *HttpRequest) bool {
@@ -319,23 +266,50 @@ pub const HttpServerConnection = struct {
             try stream.print("{}: {}\r\n", .{header.key, header.value});
         }
 
-        // Send content length if missing otherwise the client hangs reading
-        if (!response.headers.contains("Content-Length")) {
-            try stream.print("Content-Length: {}\n\n", .{response.body.len});
+        // Set default content type
+        if (!response.headers.contains("Content-Type")) {
+            try stream.write("Content-Type: text/html\r\n");
         }
 
-        // Write body
-        if (response.chunking_output) {
-            //var start = 0;
-            // TODO
+        // Send content length if missing otherwise the client hangs reading
+        if (!response.headers.contains("Content-Length")) {
+            try stream.print("Content-Length: {}\r\n", .{response.body.len});
+        }
 
-            try stream.write("0\r\n\r\n");
+        // End of headers
+        try stream.write("\r\n");
+
+        // Write body
+//         if (response.chunking_output) {
+//             var start = 0;
+//             TODO
+//
+//             try stream.write("0\r\n\r\n");
+//         }
+        var total_wrote: usize = 0;
+        if (response.source_stream != null)  {
+            const in_stream = &response.source_stream.?.stream;
+
+            // Empty the output buffer
+            try stream.flush();
+            // Send the stream
+            total_wrote = try stream.writeFromInStream(in_stream);
         } else if (response.body.len > 0) {
             try stream.write(response.body.toSlice());
+            total_wrote += response.body.len;
         }
 
         // Flush anything left
         try stream.flush();
+
+        // Make sure the content-length was correct otherwise the client
+        // will hang waiting
+        if (total_wrote != response.body.len) {
+            std.debug.warn("Invalid content-length: {} != {}\n",
+                .{total_wrote, response.body.len});
+            return error.InvalidContentLength;
+        }
+
 
         // Finish
         // If the app finished the request while we're still reading,
@@ -343,9 +317,11 @@ pub const HttpServerConnection = struct {
         // close the connection when we're done sending our response.
         // Closing the connection is the only way to avoid reading the
         // whole input body.
-        if (!request._read_finished) {
+        if (!request.read_finished) {
             self.loseConnection();
         }
+
+        response.finished = true;
     }
 
     pub fn loseConnection(self: *HttpServerConnection) void {
@@ -369,7 +345,7 @@ pub const HttpServerConnection = struct {
 pub const RequestHandler = struct {
     allocator: *Allocator,
     application: *Application,
-    request: *HttpRequest,
+    //request: *HttpRequest,
     response: *HttpResponse,
 
     // Request handler signature
@@ -394,7 +370,7 @@ pub const RequestHandler = struct {
     // Dispatches to the other handlers based on the parsed request method
     // This can be replaced with a custom handler if necessary
     pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
-        const handler: request_handler = switch (self.request.method) {
+        const handler: request_handler = switch (self.response.request.method) {
             .Get => self.get,
             .Put => self.put,
             .Post => self.post,
@@ -446,19 +422,19 @@ pub const Handler = fn(allocator: *Allocator, app: *Application,
 
 // This seems a bit excessive....
 pub fn createHandler(comptime T: type) Handler {
-    const RequestDispatcher = struct {
+    const Closure = struct {
         const Self  = @This();
 
         pub fn create(allocator: *Allocator, app: *Application,
                       response: *HttpResponse) !*RequestHandler {
-            const self = try allocator.create(T); // Create a dangling pointer lol
+            // FIXME: This breaks everything on the second request
+            const self = try allocator.create(T);
             comptime const defaultDispatch = RequestHandler.defaultDispatch;
             comptime const defaultHandler = RequestHandler.defaultHandler;
             self.* = T{
                 .handler = RequestHandler{
                     .application = app,
                     .allocator = allocator,
-                    .request = response.request,
                     .response = response,
                     .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
                     .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
@@ -516,21 +492,48 @@ pub fn createHandler(comptime T: type) Handler {
 
         pub fn destroy(req: *RequestHandler) void {
             const handler = @fieldParentPtr(T, "handler", req);
-            req.allocator.destroy(handler);
+            //req.allocator.destroy(handler);
         }
     };
 
-    return RequestDispatcher.create;
+    return Closure.create;
 }
 
 pub const Route = struct {
     name: []const u8, // Reverse url name
     path: []const u8, // Path pattern
+    startswith: bool = false,
     handler: Handler,
 
     // Create a route for the handler
-    pub fn create(name: []const u8, path: []const u8, comptime T: type) Route {
+    // It uses a django style format for parameters, eg
+    // /pages/<int>/edit
+    pub fn create(comptime name: []const u8, comptime path: []const u8, comptime T: type) Route {
+        if (path[0] != '/') {
+            @compileError("Route url path must start with /");
+        }
         return Route{.name=name, .path=path, .handler=createHandler(T)};
+    }
+
+    pub fn static(comptime name: []const u8, comptime path: []const u8) Route {
+        if (path[0] != '/' or path[path.len-1] != '/') {
+            @compileError("Route url path must start and end with /");
+        }
+        return Route{
+            .name=name,
+            .path=path,
+            .startswith=true,
+            .handler=createHandler(handlers.StaticFileHandler(path, name)),
+        };
+    }
+
+    // Check if the request path matches this route
+    pub fn matches(self: *const Route, path: []const u8) bool {
+        // TODO: This is not at all correct
+        if (self.startswith) {
+            return mem.startsWith(u8, path, self.path);
+        }
+        return mem.eql(u8, path, self.path);
     }
 };
 
@@ -538,19 +541,25 @@ pub const Route = struct {
 pub const Router = struct {
     routes: []Route,
 
+    pub fn sortLongestPath(lhs: Route, rhs: Route) bool {
+        return lhs.path.len > rhs.path.len;
+    }
+
     pub fn init(routes: []Route) Router {
+        std.sort.sort(Route, routes, sortLongestPath);
         return Router{
             .routes = routes,
         };
     }
     pub fn findHandler(self: *Router, request: *HttpRequest) !Handler {
         for (self.routes) |route| {
-            if (mem.eql(u8, route.path, request.path)) {
+            if (route.matches(request.path)) {
+                //std.debug.warn("Route: name={} path={}\n", .{route.name, request.path});
                 return route.handler;
             }
         }
+        //std.debug.warn("Route: Not found for path={}\n", .{request.path});
         return error.NotFound;
-
     }
 
     pub fn reverseUrl(self: *Router, name: []const u8, args: ...) ![]const u8 {
@@ -562,35 +571,6 @@ pub const Router = struct {
         return error.NotFound;
     }
 
-};
-
-const Middleware = struct {
-    stack_frame: []align(std.Target.stack_align) u8,
-
-    // Process the request and return the reponse
-    pub fn processRequest(self: *Middleware, request: *HttpRequest,
-                          response: *HttpResponse) !bool {
-        if (std.io.is_async) {
-            return await @asyncCall(self.stack_frame, {},
-                self.processRequestFn, self, request, response);
-        } else {
-            return self.processRequestFn(self, request, response);
-        }
-    }
-
-    pub fn processResponse(self: *Middleware, response: *HttpResponse) !void {
-        if (std.io.is_async) {
-            return await @asyncCall(self.stack_frame, {},
-                self.processResponseFn, self, response);
-        } else {
-            try self.processResponseFn(self, response);
-        }
-    }
-
-    processRequestFn: fn(self: *Middleware,
-        request: *HttpRequest, response: *HttpResponse) anyerror!bool,
-    processResponseFn: fn(self: *Middleware,
-        response: *HttpResponse) anyerror!void,
 };
 
 
@@ -611,11 +591,14 @@ pub const ConnectionPool = struct {
         return self.connections.popOrNull();
     }
 
+    // Whenever this is called, make space for the it to be released
     pub fn create(self: *ConnectionPool) !*HttpServerConnection {
-        try self.connections.ensureCapacity(self.connections.len + 1);
+        try self.connections.ensureCapacity(self.connections.capacity() + 1);
         return self.allocator.create(HttpServerConnection);
     }
 
+    // Return a connection back to the pool, this assumes it was created
+    // using create (which ensures capacity to return this quickly).
     pub fn release(self: *ConnectionPool, conn: *HttpServerConnection) void {
         return self.connections.appendAssumeCapacity(conn);
     }
@@ -634,12 +617,11 @@ pub const Application = struct {
     router: Router,
     server: net.StreamServer,
     lock: std.Mutex,
-    //const Frame = @Frame(startServing);
-    //const FrameList = std.ArrayList(*Frame);
-    //frames: FrameList,
     connection_pool: ConnectionPool,
     middleware: std.ArrayList(*Middleware),
 
+    // Global instance
+    pub var instance: ?*Application = null;
 
     // ------------------------------------------------------------------------
     // Default handlers
@@ -678,7 +660,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     pub fn init(options: Options) Application {
         const allocator = options.allocator;
-        return Application{
+        var self = Application{
             .allocator = allocator,
             .router = Router.init(options.routes),
             .options = options,
@@ -687,6 +669,8 @@ pub const Application = struct {
             .middleware = std.ArrayList(*Middleware).init(allocator),
             .connection_pool = ConnectionPool.init(allocator),
         };
+        Application.instance = &self;
+        return self;
     }
 
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
@@ -734,24 +718,26 @@ pub const Application = struct {
     // Routing and Middleware
     // ------------------------------------------------------------------------
     pub fn processRequest(self: *Application, server_conn: *HttpServerConnection,
-                        request: *HttpRequest, response: *HttpResponse) !?Handler {
+                          request: *HttpRequest, response: *HttpResponse) !?Handler {
+
+        // Let middleware process the request
+        // the request body has not yet been read at this point
+        // if the middleware returns true the response is considered to be
+        // handled and request processing stops here
         for (self.middleware.toSlice()) |middleware| {
             var done = try middleware.processRequest(request, response);
             if (done) return null;
         }
 
-        const handler = self.router.findHandler(request) catch |err| {
+        // Find the handler to perform this request
+        // if no handler is found the not_found_handler is used.
+        return self.router.findHandler(request) catch |err| {
             if (err == error.NotFound) {
                 return self.not_found_handler;
             } else {
                 return self.error_handler;
             }
         };
-
-        // Set default content type
-        try response.headers.put("Content-Type", "text/html; charset=UTF-8");
-
-        return handler;
     }
 
     pub fn processResponse(self: *Application, server_conn: *HttpServerConnection,
@@ -760,12 +746,17 @@ pub const Application = struct {
         // Add server headers
         try response.headers.put("Server", "ZHP/0.1");
         try response.headers.put("Date",
-            try util.formatDate(server_conn.allocator, time.milliTimestamp()));
+            try Datetime.formatHttpFromTimestamp(
+                server_conn.allocator, time.milliTimestamp()));
 
         for (self.middleware.toSlice()) |middleware| {
             try middleware.processResponse(response);
         }
     }
+
+    // ------------------------------------------------------------------------
+    // Cleanup
+    // ------------------------------------------------------------------------
 
     pub fn deinit(self: *Application) void {
         self.server.deinit();

@@ -1015,6 +1015,43 @@ pub const Datetime = struct {
         };
     }
 
+    // ------------------------------------------------------------------------
+    // Formatting methods
+    // ------------------------------------------------------------------------
+
+    // Formats a timestamp in the format used by HTTP.
+    // eg "Tue, 15 Nov 1994 08:12:31 GMT"
+    pub fn formatHttp(self: *Datetime, allocator: *std.mem.Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {}:{}:{} {}", .{
+            self.date.weekdayName()[0..3],
+            self.date.day,
+            self.date.monthName()[0..3],
+            self.date.year,
+            self.time.hour,
+            self.time.minute,
+            self.time.second,
+            self.time.zone.name // TODO: Should be GMT
+        });
+    }
+
+    // Formats a timestamp in the format used by HTTP.
+    // eg "Tue, 15 Nov 1994 08:12:31 GMT"
+    pub fn formatHttpFromTimestamp(allocator: *std.mem.Allocator, timestamp: u64) ![]const u8 {
+        return Datetime.fromTimestamp(timestamp).formatHttp(allocator);
+    }
+
+    // From time in nanoseconds
+    pub fn formatHttpFromModifiedDate(allocator: *std.mem.Allocator, mtime: i64) ![]const u8 {
+        comptime const ns_per_ms = time.ns_per_s/time.ms_per_s;
+        const ts = @divFloor(mtime, ns_per_ms);
+        if (ts < 0) {
+            var dt = Datetime.fromTimestamp(0);
+            return dt.shiftSeconds(ts).formatHttp(allocator);
+        } else {
+            return Datetime.formatHttpFromTimestamp(allocator, @intCast(u64, ts));
+        }
+    }
+
 };
 
 

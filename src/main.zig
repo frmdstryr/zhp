@@ -66,6 +66,7 @@ pub fn main() anyerror!void {
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
+        web.Route.static("static", "/static/"),
     };
 
     var app = web.Application.init(.{
