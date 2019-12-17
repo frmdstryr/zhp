@@ -5,6 +5,10 @@
 A Http server written in [Zig](https://ziglang.org/).  It uses a zero-copy parser that
 benchmarks around ~800MB/s per thread (compare to [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http).
 
+
+See how it compares in the [http benchmarks](https://gist.github.com/kprotty/3f369f46293a421f09190b829cfb48f7#file-newresults-md)
+done by kprotty.
+
 It's a work in progress... feel free to contribute!
 
 
