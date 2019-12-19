@@ -4,13 +4,14 @@ const mem = std.mem;
 const web = @import("web.zig");
 const responses = @import("status.zig");
 const mimetypes = @import("mimetypes.zig");
-const Datetime = @import("time/calendar.zig").Datetime;
+const Datetime = @import("time/datetime.zig").Datetime;
 
 
 pub const ServerErrorHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn dispatch(self: *ServerErrorHandler, response: *web.HttpResponse) anyerror!void {
+    pub fn dispatch(self: *ServerErrorHandler, request: *web.HttpRequest,
+                    response: *web.HttpResponse) anyerror!void {
         response.status = responses.INTERNAL_SERVER_ERROR;
         try response.body.resize(0);
 
@@ -19,7 +20,7 @@ pub const ServerErrorHandler = struct {
             //std.debug.dumpStackTrace(trace.*);
 
             try response.stream.print(
-                "<h3>Request</h3><pre>{}</pre>", .{response.request});
+                "<h3>Request</h3><pre>{}</pre>", .{request});
             try response.stream.write("<h3>Error Trace</h3><pre>");
             try std.debug.writeStackTrace(
                 trace.*,
@@ -37,7 +38,8 @@ pub const ServerErrorHandler = struct {
 
 pub const NotFoundHandler = struct {
     handler: web.RequestHandler,
-    pub fn dispatch(self: *NotFoundHandler, response: *web.HttpResponse) !void {
+    pub fn dispatch(self: *NotFoundHandler, request: *web.HttpRequest,
+                    response: *web.HttpResponse) !void {
         response.status = responses.NOT_FOUND;
         try response.stream.write("<h1>Not Found</h1>");
     }
@@ -55,9 +57,9 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         handler: web.RequestHandler,
         const Self = @This();
 
-        pub fn get(self: *Self, response: *web.HttpResponse) !void {
-            const allocator = self.handler.allocator;
-            const request = response.request;
+        pub fn get(self: *Self, request: *web.HttpRequest,
+                   response: *web.HttpResponse) !void {
+            const allocator = response.allocator;
 
             // Determine path relative to the url root
             const rel_path = try fs.path.relative(

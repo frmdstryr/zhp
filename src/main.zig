@@ -6,7 +6,8 @@ pub const io_mode = .evented;
 const MainHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
+    pub fn get(self: *MainHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "text/plain");
         try response.stream.write("Hello, World!");
     }
@@ -17,7 +18,8 @@ const StreamHandler = struct {
     handler: web.RequestHandler,
 
     // Dump a random stream of crap
-    pub fn get(self: *StreamHandler, response: *web.HttpResponse) !void {
+    pub fn get(self: *StreamHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "application/octet-stream");
         try response.headers.put("Content-Disposition",
             "attachment; filename=\"random.bin\"");
@@ -40,7 +42,8 @@ const StreamHandler = struct {
 const JsonHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *JsonHandler, response: *web.HttpResponse) !void {
+    pub fn get(self: *JsonHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "application/json");
         // TODO: dump object to json?
         try response.stream.write("{\"message\": \"Hello, World!\"}");
@@ -51,7 +54,8 @@ const JsonHandler = struct {
 const ErrorTestHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *ErrorTestHandler, response: *web.HttpResponse) !void {
+    pub fn get(self: *ErrorTestHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
         try response.stream.write("Do some work");
         return error.Ooops;
     }
@@ -70,7 +74,6 @@ pub fn main() anyerror!void {
     };
 
     var app = web.Application.init(.{
-        //.allocator=allocator,
         .routes=routes[0..],
     });
     defer app.deinit();

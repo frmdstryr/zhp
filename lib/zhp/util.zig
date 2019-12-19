@@ -40,12 +40,12 @@ pub const IOStream = struct {
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, file: File,
+    pub fn initCapacity(allocator: *Allocator, file: ?File,
                         in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_file = file,
-            .out_file = file,
+            .in_file = if (file) |f| f else try File.openRead("/dev/null"),
+            .out_file = if (file) |f| f else try File.openWrite("/dev/null"),
             .in_buffer = try allocator.alloc(u8, in_capacity),
             .out_buffer = try allocator.alloc(u8, out_capacity),
             ._in_start_index = in_capacity,
@@ -84,6 +84,7 @@ pub const IOStream = struct {
 
     // Reset the the initial state without reallocating
     pub fn reinit(self: *Self, file: File) void {
+        self.close(); // Close old files
         self.in_file = file;
         self.out_file = file;
         self._in_start_index = self.in_buffer.len;
@@ -528,4 +529,58 @@ pub const IOStream = struct {
 
 };
 
+
+
+pub fn ObjectPool(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const ObjectList = std.ArrayList(*T);
+
+        allocator: *Allocator,
+        // Stores all created objects
+        objects: ObjectList,
+
+        // Stores objects that have been released
+        free_objects: ObjectList,
+
+        lock: std.Mutex = std.Mutex.init(),
+
+        pub fn init(allocator: *Allocator) Self {
+            return Self{
+                .allocator = allocator,
+                .objects = ObjectList.init(allocator),
+                .free_objects = ObjectList.init(allocator),
+            };
+        }
+
+        // Get an object released back into the pool
+        pub fn get(self: *Self) ?*T {
+            if (self.free_objects.len == 0) return null;
+            return self.free_objects.swapRemove(0); // Pull the oldest
+        }
+
+        // Create an object and allocate space for it in the pool
+        pub fn create(self: *Self) !*T {
+            const obj = try self.allocator.create(T);
+            try self.objects.append(obj);
+            try self.free_objects.ensureCapacity(self.objects.len);
+            return obj;
+        }
+
+        // Return a object back to the pool, this assumes it was created
+        // using create (which ensures capacity to return this quickly).
+        pub fn release(self: *Self, object: *T) void {
+            return self.free_objects.appendAssumeCapacity(object);
+        }
+
+        pub fn deinit(self: *Self) void {
+            while (self.objects.popOrNull()) |obj| {
+                self.allocator.destroy(obj);
+            }
+            self.objects.deinit();
+            self.free_objects.deinit();
+        }
+
+    };
+}
 

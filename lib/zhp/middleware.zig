@@ -17,18 +17,19 @@ pub const Middleware = struct {
         }
     }
 
-    pub fn processResponse(self: *Middleware, response: *web.HttpResponse) !void {
+    pub fn processResponse(self: *Middleware, request: *web.HttpRequest,
+                           response: *web.HttpResponse) !void {
         if (std.io.is_async) {
             return await @asyncCall(self.stack_frame, {},
-                self.processResponseFn, self, response);
+                self.processResponseFn, self, request, response);
         } else {
-            try self.processResponseFn(self, response);
+            try self.processResponseFn(self, request, response);
         }
     }
 
     processRequestFn: fn(self: *Middleware,
         request: *web.HttpRequest, response: *web.HttpResponse) anyerror!bool,
     processResponseFn: fn(self: *Middleware,
-        response: *web.HttpResponse) anyerror!void,
+         request: *web.HttpRequest, response: *web.HttpResponse) anyerror!void,
 };
 

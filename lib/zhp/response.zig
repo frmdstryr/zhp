@@ -11,7 +11,8 @@ pub const Bytes = std.ArrayList(u8);
 
 
 pub const HttpResponse = struct {
-    request: *HttpRequest,
+    // Allocator for this response
+    allocator: *Allocator = undefined,
     headers: HttpHeaders,
     status: HttpStatus = responses.OK,
     disconnect_on_finish: bool = false,
@@ -31,10 +32,8 @@ pub const HttpResponse = struct {
     // Set to true if your request handler already sent everything
     finished: bool = false,
 
-    pub fn initCapacity(allocator: *Allocator, request: *HttpRequest,
-        buffer_size: usize, max_headers: usize) !HttpResponse {
+    pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !HttpResponse {
         return HttpResponse{
-            .request = request,
             .headers = try HttpHeaders.initCapacity(allocator, max_headers),
             .body = try Bytes.initCapacity(allocator, buffer_size),
         };
@@ -62,7 +61,6 @@ pub const HttpResponse = struct {
 
     pub fn deinit(self: *HttpResponse) void {
         self.headers.deinit();
-        self.request.deinit();
         self.body.deinit();
     }
 

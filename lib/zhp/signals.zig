@@ -7,14 +7,6 @@ pub extern fn handleSigintLinux(sig: i32, info: *const os.siginfo_t, ctx_ptr: *c
     if (Application.instance) |app| {
         app.deinit();
     }
-    // Reset default handler
-    var act = os.Sigaction{
-        .sigaction = os.SIG_DFL,
-        .mask = os.empty_sigset,
-        .flags = 0,
-    };
-    os.sigaction(os.SIGINT, &act, null);
-    os.raise(os.SIGINT) catch {};
     os.exit(0);
 }
 

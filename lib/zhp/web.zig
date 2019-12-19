@@ -16,161 +16,243 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 
 const responses = @import("status.zig");
 const handlers = @import("handlers.zig");
-const Datetime = @import("time/calendar.zig").Datetime;
+const Datetime = @import("time/datetime.zig").Datetime;
 
-const HttpHeaders = @import("headers.zig").HttpHeaders;
-const HttpStatus = responses.HttpStatus;
+// Does not help...
+//pub const signals = @import("signals.zig");
+
 pub const util = @import("util.zig");
 pub const IOStream = util.IOStream;
 
+pub const HttpHeaders = @import("headers.zig").HttpHeaders;
+pub const HttpStatus = responses.HttpStatus;
 pub const HttpRequest = @import("request.zig").HttpRequest;
 pub const HttpResponse = @import("response.zig").HttpResponse;
 pub const Middleware = @import("middleware.zig").Middleware;
 
 
+pub const HttpServerRequest = struct {
+    allocator: *Allocator,
+    application: *Application,
+    stack_frame: []align(std.Target.stack_align) u8 = undefined,
+
+    // Storage the fixed buffer allocator used for each request handler
+    storage: []u8 = undefined,
+    buffer: std.heap.FixedBufferAllocator = undefined,
+
+    // Request and response passed to the request handler
+    request: HttpRequest,
+    response: HttpResponse,
+
+    pub fn init(allocator: *Allocator, application: *Application) !HttpServerRequest {
+        return HttpServerRequest{
+            .allocator = allocator,
+            .application = application,
+            .stack_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, 1024),
+            .storage = try allocator.alloc(u8, 1024*1024),
+            .request = try HttpRequest.initCapacity(allocator, mem.page_size, 32),
+            .response = try HttpResponse.initCapacity(allocator, mem.page_size, 10),
+        };
+    }
+
+    // This should be in init but doesn't work due to return results being copied
+    pub fn prepare(self: *HttpServerRequest) void {
+        self.buffer = std.heap.FixedBufferAllocator.init(self.storage);
+        self.response.allocator = &self.buffer.allocator;
+    }
+
+    // Build the request handler to generate a response
+    fn buildHandler(self: *HttpServerRequest, factoryFn: Handler,
+                    request: *HttpRequest, response: *HttpResponse) !*RequestHandler {
+        if (std.io.is_async) {
+            //var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(self.stack_frame, {}, factoryFn,
+                self.application, request, response);
+        } else {
+            return factoryFn(self.application, response, response);
+        }
+    }
+
+    // Reset so it can be reused
+    pub fn reset(self: *HttpServerRequest) void {
+        self.buffer.reset();
+        self.request.reset();
+        self.response.reset();
+    }
+
+
+    // Release this request back into the pool
+    pub fn release(self: *HttpServerRequest) void {
+        //self.reset();
+        const app = self.application;
+        const lock = app.request_pool.lock.acquire();
+            app.request_pool.release(self);
+        lock.release();
+    }
+
+    pub fn deinit(self: *HttpServerConnection) void {
+        self.request.deinit();
+        self.response.deinit();
+        self.allocator.free(self.stack_frame);
+        self.allocator.free(self.storage);
+    }
+
+
+};
+
 // A single client connection
 // if the client requests keep-alive and the server allows
 // the connection is reused to process futher requests.
 pub const HttpServerConnection = struct {
+    const Frame = @Frame(startRequestLoop);
+    const RequestList = std.ArrayList(*HttpServerRequest);
     application: *Application,
-    storage: [1024*1024]u8 = undefined,
-    buffer: std.heap.FixedBufferAllocator,
-    allocator: *Allocator = undefined,
     io: IOStream,
     address: net.Address = undefined,
-    closed: bool = false,
-    const Frame = @Frame(startRequestLoop);
     frame: *Frame,
+    // Outstanding requests
+    //requests: RequestList,
 
+    pub fn init(allocator: *Allocator, application: *Application) !HttpServerConnection {
+        return HttpServerConnection{
+            .application = application,
+            //.storage = try allocator.alloc(u8, 100*1024),
+            .io = try IOStream.initCapacity(
+                allocator, null, 0, mem.page_size),
+            .frame = try allocator.create(Frame),
+            //.server_request = try HttpServerRequest.init(allocator, application),
+            //.requests = try RequestList.initCapacity(allocator, 8),
+        };
+    }
 
     // Handles a connection
     pub fn startRequestLoop(self: *HttpServerConnection,
                             conn: net.StreamServer.Connection) !void {
         self.address = conn.address;
-        self.closed = false;
-        self.allocator = &self.buffer.allocator;
         const app = self.application;
         const params = &app.options;
         const stream = &self.io;
         stream.reinit(conn.file);
-        defer self.connectionLost();
+        defer stream.close();
+        defer self.release();
 
-        var request = try HttpRequest.initCapacity(self.allocator, 4096, 32);
-        var response = try HttpResponse.initCapacity(self.allocator,
-            &request, mem.page_size, 10);
+        // Grab a request
+        // at some point this should be moved into the loop to handle
+        // multiplexing but it currently makes it slower
+        const lock = app.request_pool.lock.acquire();
+            var server_request: *HttpServerRequest = undefined;
+            if (app.request_pool.get()) |c| {
+                server_request = c;
+            } else {
+                server_request = try app.request_pool.create();
+                server_request.* = try HttpServerRequest.init(
+                    app.allocator, app);
+                server_request.prepare();
+            }
+        lock.release();
+        defer server_request.release();
+
+        const request = &server_request.request;
+        const response = &server_request.response;
 
         // Start serving requests
-        // TODO: This doesn't support pipelining
         while (true) {
-            defer self.buffer.reset();
-            defer request.reset();
-            defer response.reset();
+            defer server_request.reset();
 
+            // Parse the request line and headers
             const n = request.parse(stream) catch |err| switch (err) {
                 error.BadRequest => {
                     try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-                    self.loseConnection();
                     return;
                 },
                 error.MethodNotAllowed => {
                     try stream.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
-                    self.loseConnection();
                     return;
                 },
                 error.RequestEntityTooLarge => {
                     try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
-                    self.loseConnection();
                     return;
                 },
                 error.RequestUriTooLong => {
                     try stream.write("HTTP/1.1 413 Request-URI Too Long\r\n\r\n");
-                    self.loseConnection();
                     return;
                 },
                 error.RequestHeaderFieldsTooLarge => {
                     try stream.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
-                    self.loseConnection();
                     return;
                 },
                 //error.TimeoutError,
                 error.ConnectionResetByPeer,
-                error.EndOfStream => {
-                    self.loseConnection();
-                    return;
-                },
+                error.EndOfStream => return,
                 else => return err,
             };
 
-            const keep_alive = self.canKeepAlive(&request);
+            const keep_alive = self.canKeepAlive(request);
 
-            const factoryFn = try app.processRequest(self, &request, &response);
+            // Get the handler
+            const factoryFn = try app.processRequest(self, request, response);
+
+            // Read the body if any
+            self.readBody(request, response) catch |err| switch(err) {
+                //error.ImproperlyTerminatedChunk,
+                error.BadRequest => {
+                    try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                    return;
+                },
+                error.RequestEntityTooLarge => {
+                    try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
+                    return;
+                },
+                // error.TimeoutError,
+                error.ConnectionResetByPeer,
+                error.EndOfStream => return,
+                else => return err,
+            };
+
+            // At this point all reads on the request are done
+            // this could be spawn off into an async response for http/2
             if (factoryFn) |factory| {
-                self.readBody(&request, &response) catch |err| switch(err) {
-                    //error.ImproperlyTerminatedChunk,
-                    error.BadRequest => {
-                        try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-                        self.loseConnection();
-                        return;
-                    },
-                    error.RequestEntityTooLarge => {
-                        try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
-                        self.loseConnection();
-                        return;
-                    },
-                    // error.TimeoutError,
-                    error.ConnectionResetByPeer,
-                    error.EndOfStream => {
-                        self.loseConnection();
-                        return;
-                    },
-                    else => return err,
-                };
-
-                var handler = try self.buildHandler(factory, &response);
+                var handler = try server_request.buildHandler(
+                    factory, request, response);
                 handler.execute() catch |err| {
                     handler.deinit();
-                    var error_handler = try self.buildHandler(
-                        app.error_handler, &response);
+                    var error_handler = try server_request.buildHandler(
+                        app.error_handler, request, response);
                     defer error_handler.deinit();
                     try error_handler.execute();
                 };
                 //handler.deinit();
             }
-            try app.processResponse(self, &response);
 
-            // TODO: Write in chunks
-            if (self.closed) return;
+             try app.processResponse(self, request, response);
 
             // Request handler already sent the response
-            if (response.finished) continue;
-
-            try self.sendResponse(&response);
-            if (self.closed or !keep_alive) return;
-            //std.debug.warn("sendResponse took: {}ns\n\n", .{timer.lap()});
-            //std.debug.warn("[{}] {} {} in {}ns\n", .{
-            //    self.address, request.method, request.path,
-            //    timer.lap()});
+            if (stream.closed or response.finished) return;
+            try self.sendResponse(request, response);
+            if (stream.closed or !keep_alive) return;
         }
     }
 
-    // Build the request handler to generate a response
-    fn buildHandler(self: *HttpServerConnection, factoryFn: Handler,
-                    response: *HttpResponse) !*RequestHandler {
-        if (std.io.is_async) {
-            var stack_frame: [10*1024]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {},
-                factoryFn, self.allocator, self.application, response);
-        } else {
-            return factoryFn(self.allocator, self.application, response);
+    fn canKeepAlive(self: *HttpServerConnection, request: *HttpRequest) bool {
+        if (self.application.options.no_keep_alive) {
+            return false;
         }
+        const headers = &request.headers;
+        if (request.version == .Http1_1) {
+            return !headers.eqlIgnoreCase("Connection", "close");
+        } else if (headers.contains("Content-Length")
+                    or headers.eqlIgnoreCase("Transfer-Encoding", "chunked")
+                    or request.method == .Head or request.method == .Get){
+            return headers.eqlIgnoreCase("Connection", "keep-alive");
+        }
+        return false;
     }
-
 
     fn readBody(self: *HttpServerConnection, request: *HttpRequest,
                 response: *HttpResponse) !void {
         const params = &self.application.options;
         const content_length = request.content_length;
-        var headers = &request.headers;
+        const headers = &request.headers;
         const code = response.status.code;
 
         if (headers.eqlIgnoreCase("Expect", "100-continue")) {
@@ -221,25 +303,11 @@ pub const HttpServerConnection = struct {
         request.body = body;
     }
 
-    fn canKeepAlive(self: *HttpServerConnection, request: *HttpRequest) bool {
-        if (self.application.options.no_keep_alive) {
-            return false;
-        }
-        var headers = request.headers;
-        if (request.version == .Http1_1) {
-            return !headers.eqlIgnoreCase("Connection", "close");
-        } else if (headers.contains("Content-Length")
-                    or headers.eqlIgnoreCase("Transfer-Encoding", "chunked")
-                    or request.method == .Head or request.method == .Get){
-            return headers.eqlIgnoreCase("Connection", "keep-alive");
-        }
-        return false;
-    }
 
     // Write the request
-    pub fn sendResponse(self: *HttpServerConnection, response: *HttpResponse) !void {
+    pub fn sendResponse(self: *HttpServerConnection, request: *HttpRequest,
+                        response: *HttpResponse) !void {
         const stream = &self.io;
-        const request = response.request;
 
         // Finalize any headers
         if (request.version == .Http1_1 and response.disconnect_on_finish) {
@@ -318,34 +386,31 @@ pub const HttpServerConnection = struct {
         // Closing the connection is the only way to avoid reading the
         // whole input body.
         if (!request.read_finished) {
-            self.loseConnection();
+            stream.close();
         }
 
         response.finished = true;
     }
 
-    pub fn loseConnection(self: *HttpServerConnection) void {
-        self.io.close();
-        self.closed = true;
-    }
-
-    pub fn connectionLost(self: *HttpServerConnection) void {
-        if (!self.closed) {
-            self.loseConnection();
-        }
+    pub fn release(self: *HttpServerConnection) void {
         const app = self.application;
-        const lock = app.lock.acquire();
+        const lock = app.connection_pool.lock.acquire();
             app.connection_pool.release(self);
         lock.release();
+    }
+
+    pub fn deinit(self: *HttpServerConnection) void {
+        const allocator = self.application.allocator;
+        allocator.destroy(self.frame);
+        self.io.deinit();
     }
 
 };
 
 
 pub const RequestHandler = struct {
-    allocator: *Allocator,
     application: *Application,
-    //request: *HttpRequest,
+    request: *HttpRequest,
     response: *HttpResponse,
 
     // Request handler signature
@@ -370,7 +435,7 @@ pub const RequestHandler = struct {
     // Dispatches to the other handlers based on the parsed request method
     // This can be replaced with a custom handler if necessary
     pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
-        const handler: request_handler = switch (self.response.request.method) {
+        const handler: request_handler = switch (self.request.method) {
             .Get => self.get,
             .Put => self.put,
             .Post => self.post,
@@ -382,7 +447,7 @@ pub const RequestHandler = struct {
         };
         if (std.io.is_async) {
             // Give a good chunk to the handler
-            var stack_frame: [100*1024]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [98*1024]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {}, handler, self);
         } else {
             return handler(self);
@@ -417,24 +482,21 @@ pub const RequestHandler = struct {
 
 
 // A handler is simply a a factory function which returns a RequestHandler
-pub const Handler = fn(allocator: *Allocator, app: *Application,
-                       response: *HttpResponse) error{OutOfMemory}!*RequestHandler;
+pub const Handler = fn(app: *Application, request: *HttpRequest, response: *HttpResponse) anyerror!*RequestHandler;
 
 // This seems a bit excessive....
 pub fn createHandler(comptime T: type) Handler {
-    const Closure = struct {
+    const RequestDispatcher = struct {
         const Self  = @This();
 
-        pub fn create(allocator: *Allocator, app: *Application,
-                      response: *HttpResponse) !*RequestHandler {
-            // FIXME: This breaks everything on the second request
-            const self = try allocator.create(T);
+        pub fn create(app: *Application, request: *HttpRequest, response: *HttpResponse) !*RequestHandler {
             comptime const defaultDispatch = RequestHandler.defaultDispatch;
             comptime const defaultHandler = RequestHandler.defaultHandler;
+            const self = try response.allocator.create(T);
             self.* = T{
                 .handler = RequestHandler{
                     .application = app,
-                    .allocator = allocator,
+                    .request = request,
                     .response = response,
                     .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
                     .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
@@ -452,42 +514,42 @@ pub fn createHandler(comptime T: type) Handler {
 
         pub fn dispatch(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.dispatch(req.response);
+            return handler.dispatch(req.request, req.response);
         }
 
         pub fn head(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.head(req.response);
+            return handler.head(req.request, req.response);
         }
 
         pub fn get(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.get(req.response);
+            return handler.get(req.request, req.response);
         }
 
         pub fn post(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.post(req.response);
+            return handler.post(req.request, req.response);
         }
 
         pub fn delete(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.delete(req.response);
+            return handler.delete(req.request, req.response);
         }
 
         pub fn patch(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.patch(req.response);
+            return handler.patch(req.request, req.response);
         }
 
         pub fn put(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.put(req.response);
+            return handler.put(req.request, req.response);
         }
 
         pub fn options(req: *RequestHandler) !void {
             const handler = @fieldParentPtr(T, "handler", req);
-            return handler.options(req.response);
+            return handler.options(req.request, req.response);
         }
 
         pub fn destroy(req: *RequestHandler) void {
@@ -496,7 +558,7 @@ pub fn createHandler(comptime T: type) Handler {
         }
     };
 
-    return Closure.create;
+    return RequestDispatcher.create;
 }
 
 pub const Route = struct {
@@ -574,50 +636,16 @@ pub const Router = struct {
 };
 
 
-pub const ConnectionPool = struct {
-    allocator: *Allocator,
-    pub const ConnectionList = std.ArrayList(*HttpServerConnection);
-    connections: ConnectionList,
-
-    pub fn init(allocator: *Allocator) ConnectionPool {
-        return ConnectionPool{
-            .allocator = allocator,
-            .connections = ConnectionList.init(allocator),
-        };
-    }
-
-    // Pop the last released buffer or create a new one
-    pub fn get(self: *ConnectionPool) ?*HttpServerConnection {
-        return self.connections.popOrNull();
-    }
-
-    // Whenever this is called, make space for the it to be released
-    pub fn create(self: *ConnectionPool) !*HttpServerConnection {
-        try self.connections.ensureCapacity(self.connections.capacity() + 1);
-        return self.allocator.create(HttpServerConnection);
-    }
-
-    // Return a connection back to the pool, this assumes it was created
-    // using create (which ensures capacity to return this quickly).
-    pub fn release(self: *ConnectionPool, conn: *HttpServerConnection) void {
-        return self.connections.appendAssumeCapacity(conn);
-    }
-
-    pub fn deinit(self: *ConnectionPool) void {
-        while (self.connections.popOrNull()) |conn| {
-            self.allocator.destroy(conn);
-        }
-    }
-
-};
-
 
 pub const Application = struct {
+    pub const ConnectionPool = util.ObjectPool(HttpServerConnection);
+    pub const RequestPool = util.ObjectPool(HttpServerRequest);
+
     allocator: *Allocator,
     router: Router,
     server: net.StreamServer,
-    lock: std.Mutex,
     connection_pool: ConnectionPool,
+    request_pool: RequestPool,
     middleware: std.ArrayList(*Middleware),
 
     // Global instance
@@ -660,53 +688,45 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     pub fn init(options: Options) Application {
         const allocator = options.allocator;
-        var self = Application{
+        return Application{
             .allocator = allocator,
             .router = Router.init(options.routes),
             .options = options,
             .server = net.StreamServer.init(options.server_options),
-            .lock = std.Mutex.init(),
             .middleware = std.ArrayList(*Middleware).init(allocator),
             .connection_pool = ConnectionPool.init(allocator),
+            .request_pool = RequestPool.init(allocator),
         };
-        Application.instance = &self;
-        return self;
     }
 
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
         std.debug.warn("Listing on {}:{}\n", .{address, port});
+        //signals.setupSignalHandlers();
     }
 
     // Start serving requests For each incoming connection.
     // The connections may be kept alive to handle more than one request.
     pub fn start(self: *Application) !void {
-        const allocator = self.allocator;
-
+        Application.instance = self;
         while (true) {
-            const conn = try self.server.accept();
-
             // Grab a frame
-            const lock = self.lock.acquire();
+            const lock = self.connection_pool.lock.acquire();
                 var server_conn: *HttpServerConnection = undefined;
                 if (self.connection_pool.get()) |c| {
                     server_conn = c;
                 } else {
                     server_conn = try self.connection_pool.create();
-                    server_conn.* = HttpServerConnection{
-                        .application = self,
-                        .buffer = std.heap.FixedBufferAllocator.init(
-                            &server_conn.storage),
-                        .io = try IOStream.initCapacity(
-                            allocator, conn.file, 0, mem.page_size),
-                        .frame = try allocator.create(HttpServerConnection.Frame)
-                    };
-                }
+                    server_conn.* = try HttpServerConnection.init(self.allocator, self);
+                    //server_conn.server_request.prepare();
+               }
             lock.release();
 
+            const conn = try self.server.accept();
+
             // Start processing requests
-            if (std.io.is_async) {
+            if (comptime std.io.is_async) {
                 server_conn.frame.* = async server_conn.startRequestLoop(conn);
             } else {
                 try server_conn.startRequestLoop(conn);
@@ -741,26 +761,40 @@ pub const Application = struct {
     }
 
     pub fn processResponse(self: *Application, server_conn: *HttpServerConnection,
-                           response: *HttpResponse) !void {
+                           request: *HttpRequest, response: *HttpResponse) !void {
 
         // Add server headers
         try response.headers.put("Server", "ZHP/0.1");
         try response.headers.put("Date",
             try Datetime.formatHttpFromTimestamp(
-                server_conn.allocator, time.milliTimestamp()));
+                response.allocator, time.milliTimestamp()));
 
         for (self.middleware.toSlice()) |middleware| {
-            try middleware.processResponse(response);
+            try middleware.processResponse(request, response);
         }
     }
 
     // ------------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------------
+    pub fn closeAllConnections(self: *Application) void {
+        const lock = self.connection_pool.lock.acquire();
+        defer lock.release();
+        var n: usize = 0;
+        for (self.connection_pool.objects.toSlice()) |server_conn| {
+            if (!server_conn.io.closed) continue;
+            server_conn.io.close();
+            n += 1;
+        }
+        std.debug.warn(" Closed {} connections.\n", .{n});
+    }
 
     pub fn deinit(self: *Application) void {
+        std.debug.warn(" Shutting down...\n", .{});
+        self.closeAllConnections();
         self.server.deinit();
         self.connection_pool.deinit();
+        self.request_pool.deinit();
         self.middleware.deinit();
     }
 

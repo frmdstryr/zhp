@@ -1,16 +1,12 @@
+// -------------------------------------------------------------------------- //
+// Copyright (c) 2019, Jairus Martin.                                         //
+// Distributed under the terms of the MIT License.                            //
+// The full license is in the file LICENSE, distributed with this software.   //
+// -------------------------------------------------------------------------- //
+
 const std = @import("std");
 
-pub const Timezone = struct {
-    offset: i16, // In minutes
-    name: []const u8,
-
-    // Auto register timezone
-    pub fn create(name: []const u8, offset: i16) Timezone {
-        const self = Timezone{.offset=offset, .name=name};
-        return self;
-    }
-};
-
+const Timezone = @import("datetime.zig").Timezone;
 const create = Timezone.create;
 
 // Timezones
