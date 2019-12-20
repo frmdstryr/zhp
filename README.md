@@ -23,7 +23,7 @@ pub const io_mode = .evented;
 const MainHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *MainHandler, response: *web.HttpResponse) !void {
+    pub fn get(self: *MainHandler, request: *web.HttpRequest, response: *web.HttpResponse) !void {
         try response.headers.put("Content-Type", "text/plain");
         try response.stream.write("Hello, World!");
     }
