@@ -74,6 +74,21 @@ pub const IOStream = struct {
         self._in_end_index = in_buffer.len;
     }
 
+    // Reset the stream to the "unread" state for testing
+    pub fn startTest(self: *Self) void {
+        //if (!builtin.is_test) @compileError("This is for testing only");
+        self._in_start_index = 0;
+        self._in_end_index = self.in_buffer.len;
+        self._in_count = 0;
+        self.closed = false;
+        self.unbuffered = false;
+        //if (buffer.len == 0) return error.EndOfStream;
+        return;
+    }
+
+    // ------------------------------------------------------------------------
+    // Custom Stream API
+    // ------------------------------------------------------------------------
     pub fn reset(self: *Self) void {
         self._in_start_index = 0;
         self._in_count = 0;
@@ -100,19 +115,17 @@ pub const IOStream = struct {
     // into the new buffer
     pub fn swapBuffer(self: *Self, buffer: []u8) void {
         //const left = self.amountBuffered();
-        if (builtin.is_test) {
-            self._in_start_index = 0;
-            self._in_end_index = buffer.len;
-            self._in_count = 0;
-            //if (buffer.len == 0) return error.EndOfStream;
-            return;
-        }
 
-        // TODO: Don't toss previous bytes
+        // Reset counter
+        self._in_count = 0;
+
+        // No swap needed
+        if (buffer.ptr == self.in_buffer.ptr) return;
+
+        // Don't toss previous bytes
         self.in_buffer = buffer; // Set it right away
         self._in_start_index = buffer.len;
         self._in_end_index = buffer.len;
-        self._in_count = 0;
         self.unbuffered = false;
     }
 
@@ -130,6 +143,7 @@ pub const IOStream = struct {
     }
 
     pub inline fn readCount(self: *Self) usize {
+        //return self._in_count + self._in_start_index;
         return self._in_start_index;
     }
 
@@ -169,7 +183,7 @@ pub const IOStream = struct {
                 if (dest_space < self.in_buffer.len) {
                     self._in_start_index = 0;
                     self._in_end_index = try self.in_file.read(self.in_buffer[0..]);
-                    self._in_count += self._in_end_index;
+                    //self._in_count += self._in_end_index;
 
                     // Shortcut
                     if (self._in_end_index >= dest_space) {
@@ -181,7 +195,7 @@ pub const IOStream = struct {
                     // asking for so much data that buffering is actually less efficient.
                     // forward the request directly to the unbuffered stream
                     const amt_read = try self.in_file.read(dest[dest_index..]);
-                    self._in_count += amt_read;
+                    //self._in_count += amt_read;
                     return dest_index + amt_read;
                 }
             }
@@ -201,6 +215,13 @@ pub const IOStream = struct {
         } else {
             return self.readFn(buffer);
         }
+    }
+
+    pub fn fillBuffer(self: *Self) !void {
+        const n = try self.read(self.in_buffer);
+        if (n == 0) return error.EndOfStream;
+        self._in_start_index = 0;
+        self._in_end_index = n;
     }
 
     /// Returns the number of bytes read. If the number read is smaller than buf.len, it
@@ -344,6 +365,7 @@ pub const IOStream = struct {
         }
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
+        //self._in_count += 1;
         return c;
     }
 
@@ -353,7 +375,12 @@ pub const IOStream = struct {
         }
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
+        //self._in_count += 1;
         return c;
+    }
+
+    pub inline fn lastByte(self: *Self) u8 {
+        return self.in_buffer[self._in_start_index];
     }
 
     /// Same as `readByte` except the returned byte is signed.
