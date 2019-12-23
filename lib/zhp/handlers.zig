@@ -61,7 +61,7 @@ pub const NotFoundHandler = struct {
 pub fn StaticFileHandler(comptime static_url: []const u8,
                          comptime static_root: []const u8) type {
     if (!fs.path.isAbsolute(static_url)) {
-        @compileError("Url use relative paths");
+        @compileError("The static url must be absolute");
     }
     // TODO: Should the root be checked if it exists?
     return  struct {
