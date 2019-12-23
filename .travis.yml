@@ -19,6 +19,7 @@ before_install:
 script:
     # Test request parser
     - zig test --release-fast lib/zhp/request.zig
+    - zig test lib/zhp/mimetypes.zig
 
     # Test example server
     - zig run tests/bench.zig

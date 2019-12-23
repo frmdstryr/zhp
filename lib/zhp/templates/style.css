@@ -1,0 +1,13 @@
+body {
+    font-family: Arial,x-locale-body,sans-serif;
+}
+
+pre {
+    background-color: #eee;
+    border-left: 4px solid #3d7e9a;
+    color: #333;
+    font-size: 1rem;
+    font-family: consolas,monaco,"Andale Mono",monospace;
+    overflow: auto;
+    padding: 1em;
+}

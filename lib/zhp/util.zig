@@ -543,6 +543,7 @@ pub fn ObjectPool(comptime T: type) type {
         // Stores objects that have been released
         free_objects: ObjectList,
 
+        // Lock to use if using threads
         lock: std.Mutex = std.Mutex.init(),
 
         pub fn init(allocator: *Allocator) Self {
@@ -584,3 +585,58 @@ pub fn ObjectPool(comptime T: type) type {
     };
 }
 
+
+// A map of arrays
+pub fn StringArrayMap(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const Array = std.ArrayList(T);
+        pub const Map = std.StringHashMap(*Array);
+        allocator: *Allocator,
+        storage: Map,
+
+        pub fn init(allocator: *Allocator) Self {
+            return Self{
+                .allocator = allocator,
+                .storage = Map.init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            // Deinit each array
+            var it = self.storage.iterator();
+            while (it.next()) |entry| {
+                entry.value.deinit();
+            }
+            self.storage.clear();
+        }
+
+        pub fn append(self: *Self, name: []const u8, arg: T) !void {
+            if (!self.storage.contains(name)) {
+                const ptr = try self.allocator.create(Array);
+                ptr.* = Array.init(self.allocator);
+                _ = try self.storage.put(name, ptr);
+            }
+            var array = self.get(name).?;
+            try array.append(arg);
+        }
+
+        pub fn get(self: *Self, name: []const u8) ?*Array {
+            return self.storage.getValue(name);
+        }
+    };
+}
+
+
+test "string-array-map" {
+    const Map = StringArrayMap([]const u8);
+    var map = Map.init(std.heap.direct_allocator);
+    try map.append("query", "a");
+    try map.append("query", "b");
+    try map.append("query", "c");
+    const query = map.get("query").?;
+    testing.expect(query.len == 3);
+    testing.expect(mem.eql(u8, query.items[0], "a"));
+
+    map.deinit();
+}

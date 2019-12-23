@@ -17,6 +17,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const responses = @import("status.zig");
 const handlers = @import("handlers.zig");
 const Datetime = @import("time/datetime.zig").Datetime;
+const mimetypes = @import("mimetypes.zig");
 
 // Does not help...
 //pub const signals = @import("signals.zig");
@@ -219,6 +220,7 @@ pub const HttpServerConnection = struct {
                     var error_handler = try server_request.buildHandler(
                         app.error_handler, request, response);
                     defer error_handler.deinit();
+                    error_handler.err = err;
                     try error_handler.execute();
                 };
                 //handler.deinit();
@@ -412,6 +414,7 @@ pub const RequestHandler = struct {
     application: *Application,
     request: *HttpRequest,
     response: *HttpResponse,
+    err: ?anyerror = null,
 
     // Request handler signature
     const request_handler = if (std.io.is_async)
@@ -647,6 +650,7 @@ pub const Application = struct {
     connection_pool: ConnectionPool,
     request_pool: RequestPool,
     middleware: std.ArrayList(*Middleware),
+    mimetypes: mimetypes.Registry,
 
     // Global instance
     pub var instance: ?*Application = null;
@@ -696,6 +700,7 @@ pub const Application = struct {
             .middleware = std.ArrayList(*Middleware).init(allocator),
             .connection_pool = ConnectionPool.init(allocator),
             .request_pool = RequestPool.init(allocator),
+            .mimetypes = mimetypes.Registry.init(allocator),
         };
     }
 
@@ -709,6 +714,8 @@ pub const Application = struct {
     // Start serving requests For each incoming connection.
     // The connections may be kept alive to handle more than one request.
     pub fn start(self: *Application) !void {
+        try self.mimetypes.load();
+
         Application.instance = self;
         while (true) {
             // Grab a frame

@@ -1,8 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const fs = std.fs;
 const mem = std.mem;
 const ascii = std.ascii;
+const Allocator = mem.Allocator;
+const testing = std.testing;
 
-// TODO: Read from these
 pub const known_files = &[_][]const u8{
     "/etc/mime.types",
     "/etc/httpd/mime.types",                    // Mac OS X
@@ -176,27 +179,179 @@ pub const extension_map = &[_][2][]const u8 {
 };
 
 
-pub fn guessFromFilename(filename: []const u8) ?[]const u8 {
-    const last_dot = mem.lastIndexOf(u8, filename, ".");
-    if (last_dot) |i| return guessFromExtension(filename[i..]);
-    return null;
+// Whitespace characters
+const WS = " \t\r\n";
+
+// Replace inplace
+fn replace(line: []u8, find: u8, replacement: u8) void {
+    var i: usize = 0;
+    while (i < line.len) : (i += 1) {
+        if (line[i] == find) line[i] = replacement;
+    }
 }
 
-// Guess the mimetype from the extension
-pub fn guessFromExtension(ext: []const u8) ?[]const u8 {
-    if (ext.len < 2 or ext[0] != '.') return null;
-    for (extension_map) |t| {
-        if (ascii.eqlIgnoreCase(t[0][1..], ext[1..])) return t[1];
+
+pub const Registry = struct {
+    loaded: bool = false,
+    allocator: *Allocator,
+
+    const StringMap = std.StringHashMap([]const u8);
+    const StringArray = std.ArrayList([]const u8);
+    const StringArrayMap = std.StringHashMap(*StringArray);
+
+    // Maps extension type to mime type
+    type_map: StringMap,
+
+    // Maps mime type to list of extensions
+    type_map_inv: StringArrayMap,
+
+    pub fn init(allocator: *Allocator) Registry {
+        // Must call load separately to avoid https://github.com/ziglang/zig/issues/2765
+        return Registry{
+            .allocator = allocator,
+            .type_map = StringMap.init(allocator),
+            .type_map_inv = StringArrayMap.init(allocator),
+        };
     }
-    return null;
-}
+
+    // Add a mapping between a type and an extension.
+    // this copies both and will overwrite any existing entries
+    pub fn addType(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
+        // Add '.' if necessary
+        const extension =
+            if (mem.startsWith(u8, ext, "."))
+                try mem.dupe(self.allocator, u8, mem.trim(u8, ext, WS))
+            else
+                try mem.concat(self.allocator, u8,
+                    &[_][]const u8{".", mem.trim(u8, ext, WS)});
+        return self.addTypeInternal(
+            extension,
+            try mem.dupe(self.allocator, u8, mem.trim(u8, mime_type, WS)));
+    }
+
+    // Add a mapping between a type and an extension.
+    // this assumes the entries added are already owend
+    fn addTypeInternal(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
+        // std.debug.warn("  adding {}: {} to registry...\n", .{ext, mime_type});
+        _ = try self.type_map.put(ext, mime_type);
+
+        if (self.type_map_inv.getValue(mime_type)) |extensions| {
+            // Check if it's already there
+            for (extensions.toSlice()) |e| {
+                if (mem.eql(u8, e, ext)) return; // Already there
+            }
+            try extensions.append(ext);
+        } else {
+            // Create a new list of extensions
+            const extensions = try self.allocator.create(StringArray);
+            extensions.* = StringArray.init(self.allocator);
+            _ = try self.type_map_inv.put(mime_type, extensions);
+            try extensions.append(ext);
+        }
+    }
+
+    pub fn load(self: *Registry) !void {
+        if (self.loaded) return;
+        self.loaded = true;
+        // Load defaults
+        for (extension_map) |entry| {
+            try self.addType(entry[0], entry[1]);
+        }
+
+        // Load from system
+        if (builtin.os == .windows) {
+            // TODO: Windows
+        } else {
+            try self.loadRegistryLinux();
+        }
+    }
+
+    pub fn loadRegistryLinux(self: *Registry) !void {
+        for (known_files) |path| {
+            var file = fs.File.openRead(path) catch |err| continue;
+            // std.debug.warn("Loading {}...\n", .{path});
+            try self.loadRegistryFile(file);
+        }
+    }
+
+    // Read a single mime.types-format file.
+    pub fn loadRegistryFile(self: *Registry, file: fs.File) !void {
+        const stream = &std.io.BufferedInStream(
+            fs.File.ReadError).init(&file.inStream().stream).stream;
+        var buf: [1024]u8 = undefined;
+        while (true) {
+            const result = try stream.readUntilDelimiterOrEof(&buf, '\n');
+            if (result == null) break; // EOF
+            var line = result.?;
+
+            line = mem.trim(u8, line, WS);
+
+            // Strip comments
+            const end = mem.indexOf(u8, line, "#") orelse line.len;
+            line = line[0..end];
+
+            // Replace tabs with spaces to normalize so tokenize works
+            replace(line, '\t', ' ');
+
+            // Empty or no spaces
+            if (line.len == 0 or mem.indexOf(u8, line, " ") == null) continue;
+
+            var it = mem.tokenize(line, " ");
+            const mime_type = it.next() orelse continue;
+            while (it.next()) |ext| {
+                try self.addType(ext, mime_type);
+            }
+        }
+    }
+
+    // Guess the mime type from the filename
+    pub fn getTypeFromFilename(self: *Registry, filename: []const u8) ?[]const u8 {
+        const last_dot = mem.lastIndexOf(u8, filename, ".");
+        if (last_dot) |i| return self.getTypeFromExtension(filename[i..]);
+        return null;
+    }
+
+    // Guess the type of a file based on its URL.
+    pub fn getTypeFromExtension(self: *Registry, ext: []const u8) ?[]const u8 {
+        return self.type_map.getValue(ext);
+    }
+
+    pub fn getExtensionsByType(self: *Registry, mime_type: []const u8) ?*StringArray {
+        return self.type_map_inv.getValue(mime_type);
+    }
+
+    pub fn deinit(self: *Registry) void {
+        // Free type
+        var it = self.type_map.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.key);
+            self.allocator.free(entry.value);
+        }
+        self.type_map.deinit();
+
+        // Free the type map
+        var iter = self.type_map_inv.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.key);
+            for (entry.value.toSlice()) |str| {
+                self.allocator.free(str);
+            }
+            entry.value.deinit();
+        }
+        self.type_map_inv.deinit();
+    }
+
+};
 
 
 test "guess-ext" {
-    const testing = std.testing;
+    var registry = Registry.init(std.heap.page_allocator);
+    defer registry.deinit();
+    try registry.load();
+
     testing.expectEqualSlices(u8,
-        "image/png", guessFromFilename("an-image.png").?);
+        "image/png", registry.getTypeFromFilename("an-image.png").?);
     testing.expectEqualSlices(u8,
-        "application/javascript", guessFromFilename("wavascript.js").?);
+        "application/javascript", registry.getTypeFromFilename("wavascript.js").?);
 
 }

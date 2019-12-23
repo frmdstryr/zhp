@@ -1060,7 +1060,7 @@ pub const Datetime = struct {
     // Formats a timestamp in the format used by HTTP.
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
     pub fn formatHttp(self: *Datetime, allocator: *std.mem.Allocator) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {}:{}:{} {}", .{
+        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {d:0>2}:{d:0>2}:{d:0>2} {}", .{
             self.date.weekdayName()[0..3],
             self.date.day,
             self.date.monthName()[0..3],
@@ -1194,4 +1194,22 @@ test "datetime-subtract" {
      b = try Datetime.create(2019, 12, 2, 11, 0, 0, 466545, null);
      delta = a.sub(b);
      testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
+}
+
+test "readme-example" {
+    const allocator = std.heap.page_allocator;
+    var date = try Date.create(2019, 12, 25);
+    var next_year = date.shiftDays(7);
+    assert(next_year.year == 2020);
+    assert(next_year.month == 1);
+    assert(next_year.day == 1);
+
+    // In UTC
+    var now = Datetime.now();
+    var now_str = try now.formatHttp(allocator);
+    defer allocator.free(now_str);
+    std.debug.warn("The time is now: {}\n", .{now_str});
+    // The time is now: Fri, 20 Dec 2019 22:03:02 UTC
+
+
 }

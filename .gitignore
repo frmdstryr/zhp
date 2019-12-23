@@ -3,3 +3,4 @@ zig-cache/
 .kdev4/
 *.kate-swp
 
+callgrind.*

@@ -3,45 +3,56 @@ const fs = std.fs;
 const mem = std.mem;
 const web = @import("web.zig");
 const responses = @import("status.zig");
-const mimetypes = @import("mimetypes.zig");
 const Datetime = @import("time/datetime.zig").Datetime;
+
+pub var default_stylesheet = @embedFile("templates/style.css");
+
 
 
 pub const ServerErrorHandler = struct {
     handler: web.RequestHandler,
-
+    const template = @embedFile("templates/error.html");
     pub fn dispatch(self: *ServerErrorHandler, request: *web.HttpRequest,
                     response: *web.HttpResponse) anyerror!void {
         response.status = responses.INTERNAL_SERVER_ERROR;
+
+        // Clear any existing data
         try response.body.resize(0);
 
-        if (@errorReturnTrace()) |trace| {
-            try response.stream.write("<h1>Server Error</h1>");
-            //std.debug.dumpStackTrace(trace.*);
+        // Split the template on the key
+        comptime const key = "{% stacktrace %}";
+        comptime const start = mem.indexOf(u8, template, key).?;
+        comptime const end = start + key.len;
 
-            try response.stream.print(
-                "<h3>Request</h3><pre>{}</pre>", .{request});
-            try response.stream.write("<h3>Error Trace</h3><pre>");
+        // Send it
+        try response.stream.print(template[0..start], .{default_stylesheet});
+
+        // Dump stack trace
+        if (self.handler.err) |err| {
+            try response.stream.print("error: {}\n", .{@errorName(err)});
+        }
+        if (@errorReturnTrace()) |trace| {
             try std.debug.writeStackTrace(
                 trace.*,
                 &response.stream,
-                self.handler.application.allocator,
+                response.allocator,
                 try std.debug.getSelfDebugInfo(),
                 false);
-            try response.stream.write("</pre>");
-        } else {
-            try response.stream.write("<h1>Server Error</h1>");
         }
+
+        // Dump request and end of page
+        try response.stream.print(template[end..], .{request});
     }
 
 };
 
 pub const NotFoundHandler = struct {
     handler: web.RequestHandler,
+    const template = @embedFile("templates/not-found.html");
     pub fn dispatch(self: *NotFoundHandler, request: *web.HttpRequest,
                     response: *web.HttpResponse) !void {
         response.status = responses.NOT_FOUND;
-        try response.stream.write("<h1>Not Found</h1>");
+        try response.stream.print(template, .{default_stylesheet});
     }
 
 };
@@ -60,6 +71,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         pub fn get(self: *Self, request: *web.HttpRequest,
                    response: *web.HttpResponse) !void {
             const allocator = response.allocator;
+            const mimetypes = &self.handler.application.mimetypes;
 
             // Determine path relative to the url root
             const rel_path = try fs.path.relative(
@@ -88,7 +100,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             const stat = try file.stat();
 
             // TODO: Determine actual content type
-            const content_type = mimetypes.guessFromFilename(full_path)
+            const content_type = mimetypes.getTypeFromFilename(full_path)
                 orelse "application/octet-stream";
             try response.headers.put("Content-Type", content_type);
 

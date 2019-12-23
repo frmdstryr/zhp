@@ -63,6 +63,30 @@ const ErrorTestHandler = struct {
 };
 
 
+
+const FormHandler = struct {
+    handler: web.RequestHandler,
+
+    pub fn get(self: *FormHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
+        try response.stream.write(
+            \\<form action="/form/" method="post" enctype="multipart/form-data">
+            \\<input type="text" name="description" value="some text">
+            \\<input type="file" name="myFile">
+            \\<button type="submit">Submit</button>
+            \\</form>
+        );
+    }
+
+    pub fn post(self: *FormHandler, request: *web.HttpRequest,
+               response: *web.HttpResponse) !void {
+        try response.stream.write(
+            \\<h1>Thanks!</h1>
+        );
+    }
+};
+
+
 pub fn main() anyerror!void {
 
     const routes = [_]web.Route{
@@ -70,6 +94,7 @@ pub fn main() anyerror!void {
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
+        web.Route.create("form", "/form/", FormHandler),
         web.Route.static("static", "/static/"),
     };
 
