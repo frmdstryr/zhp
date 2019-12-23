@@ -69,10 +69,13 @@ pub const HttpRequest = struct {
     read_finished: bool = false,
     headers: HttpHeaders,
 
-    // Holds path and headers
+    // Holds the whole request (for now)
     buffer: Bytes,
 
-    // Holds the rest
+    // Slice from the start to the body
+    head: []const u8 = "",
+
+    // Body of request
     body: []const u8 = "",
 
     pub fn init(allocator: *Allocator) !HttpRequest {
@@ -108,6 +111,8 @@ pub const HttpRequest = struct {
         var n = try self.parseRequestLine(stream, 2048);
         n += try self.parseHeaders(stream, 32*1024);
         try self.parseContentLength(100*1024*1024);
+        const buf = &self.buffer;
+        self.head = buf.toSlice()[0..n];
         return n;
     }
 

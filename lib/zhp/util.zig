@@ -129,6 +129,16 @@ pub const IOStream = struct {
         return self._in_end_index-self._in_start_index;
     }
 
+    pub inline fn readCount(self: *Self) usize {
+        return self._in_start_index;
+    }
+
+    pub inline fn consumeBuffered(self: *Self, size: usize) usize {
+        const n = math.min(size, self.amountBuffered());
+        self._in_start_index += n;
+        return n;
+    }
+
     fn readFn(self: *Self, dest: []u8) !usize {
         //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
         if (self.unbuffered) return try self.in_file.read(dest);
@@ -344,10 +354,6 @@ pub const IOStream = struct {
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
         return c;
-    }
-
-    pub inline fn readCount(self: *Self) usize {
-        return self._in_start_index;
     }
 
     /// Same as `readByte` except the returned byte is signed.

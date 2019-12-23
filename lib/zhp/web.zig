@@ -290,19 +290,32 @@ pub const HttpServerConnection = struct {
         const params = &self.application.options;
         const stream = &self.io;
 
-        // The parser stops reading at the index of the end of the headers
-        const end_of_headers = request.buffer.len;
+        // End of the request
+        const end_of_request = request.head.len;
 
         // Resize the buffer to fit the rest
-        try request.buffer.resize(request.content_length + end_of_headers);
+        try request.buffer.resize(request.content_length + end_of_request);
 
-        // Switch the stream to unbuffered mode and read directly to the request
-        // buffer
-        var body = request.buffer.toSlice()[end_of_headers..];
-        stream.readUnbuffered(true);
-        defer stream.readUnbuffered(false);
-        try stream.readNoEof(body);
+        // Anything else is the body
+        var body = request.buffer.toSlice()[end_of_request..];
+
+        // Take whatever is still buffered
+        const amt = stream.consumeBuffered(request.content_length);
+
+        if (amt < request.content_length) {
+            // We need to read more
+            var buf = body[amt..];
+
+            // Switch the stream to unbuffered mode and read directly to the request
+            // buffer
+            // TODO: Should do read in chunks
+            stream.readUnbuffered(true);
+            defer stream.readUnbuffered(false);
+            try stream.readNoEof(buf);
+        } // otherwise the body is already in the request buffer
+
         request.body = body;
+        return;
     }
 
 
@@ -684,6 +697,9 @@ pub const Application = struct {
         // List of trusted downstream (ie proxy) servers
         trusted_downstream: ?[][]const u8 = null,
         server_options: net.StreamServer.Options = net.StreamServer.Options{},
+
+        // Debugging
+        debug: bool = false,
     };
     options: Options,
 

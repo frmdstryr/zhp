@@ -100,6 +100,7 @@ pub fn main() anyerror!void {
 
     var app = web.Application.init(.{
         .routes=routes[0..],
+        .debug=true,
     });
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
