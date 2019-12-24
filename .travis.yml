@@ -14,11 +14,11 @@ before_install:
     - docker pull williamyeh/wrk
 
     # Make sure this repo builds
-    - zig build -Drelease-safe=true install
+    - zig build -Drelease-fast=true install
 
 script:
     # Test request parser
-    - zig test --release-safe lib/zhp/request.zig
+    - zig test --release-fast lib/zhp/request.zig
     - zig test lib/zhp/mimetypes.zig
 
     # Test example server
