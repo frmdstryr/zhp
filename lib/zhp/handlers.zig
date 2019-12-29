@@ -12,8 +12,8 @@ pub var default_stylesheet = @embedFile("templates/style.css");
 pub const ServerErrorHandler = struct {
     handler: web.RequestHandler,
     const template = @embedFile("templates/error.html");
-    pub fn dispatch(self: *ServerErrorHandler, request: *web.HttpRequest,
-                    response: *web.HttpResponse) anyerror!void {
+    pub fn dispatch(self: *ServerErrorHandler, request: *web.Request,
+                    response: *web.Response) anyerror!void {
         response.status = responses.INTERNAL_SERVER_ERROR;
 
         // Clear any existing data
@@ -49,8 +49,8 @@ pub const ServerErrorHandler = struct {
 pub const NotFoundHandler = struct {
     handler: web.RequestHandler,
     const template = @embedFile("templates/not-found.html");
-    pub fn dispatch(self: *NotFoundHandler, request: *web.HttpRequest,
-                    response: *web.HttpResponse) !void {
+    pub fn dispatch(self: *NotFoundHandler, request: *web.Request,
+                    response: *web.Response) !void {
         response.status = responses.NOT_FOUND;
         try response.stream.print(template, .{default_stylesheet});
     }
@@ -68,8 +68,8 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         handler: web.RequestHandler,
         const Self = @This();
 
-        pub fn get(self: *Self, request: *web.HttpRequest,
-                   response: *web.HttpResponse) !void {
+        pub fn get(self: *Self, request: *web.Request,
+                   response: *web.Response) !void {
             const allocator = response.allocator;
             const mimetypes = &self.handler.application.mimetypes;
 
@@ -102,10 +102,10 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             // TODO: Determine actual content type
             const content_type = mimetypes.getTypeFromFilename(full_path)
                 orelse "application/octet-stream";
-            try response.headers.put("Content-Type", content_type);
+            try response.headers.append("Content-Type", content_type);
 
             // Set last modified time for caching purposes
-            try response.headers.put("Last-Modified",
+            try response.headers.append("Last-Modified",
                 try Datetime.formatHttpFromModifiedDate(allocator, stat.mtime));
 
             const range_header = request.headers.getDefault("Range", "");
@@ -121,7 +121,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             response.source_stream = file.inStream();
         }
 
-        pub fn renderNotFound(self: *Self, response: *web.HttpResponse) !void {
+        pub fn renderNotFound(self: *Self, response: *web.Response) !void {
             response.status = responses.NOT_FOUND;
             try response.stream.write("<h1>Not Found</h1>");
         }

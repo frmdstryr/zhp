@@ -2,19 +2,19 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const responses = @import("status.zig");
-const HttpStatus = @import("status.zig").HttpStatus;
-const HttpHeaders = @import("headers.zig").HttpHeaders;
-const HttpRequest = @import("request.zig").HttpRequest;
+const Status = @import("status.zig").Status;
+const Headers = @import("headers.zig").Headers;
+const Request = @import("request.zig").Request;
 
 
 pub const Bytes = std.ArrayList(u8);
 
 
-pub const HttpResponse = struct {
+pub const Response = struct {
     // Allocator for this response
     allocator: *Allocator = undefined,
-    headers: HttpHeaders,
-    status: HttpStatus = responses.OK,
+    headers: Headers,
+    status: Status = responses.OK,
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
 
@@ -23,7 +23,7 @@ pub const HttpResponse = struct {
 
     // Use this to print directly into the body buffer
     stream: std.io.BufferOutStream.Stream = std.io.BufferOutStream.Stream{
-        .writeFn = HttpResponse.writeFn
+        .writeFn = Response.writeFn
     },
 
     // If this is set, the response will read from the stream
@@ -32,15 +32,15 @@ pub const HttpResponse = struct {
     // Set to true if your request handler already sent everything
     finished: bool = false,
 
-    pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !HttpResponse {
-        return HttpResponse{
-            .headers = try HttpHeaders.initCapacity(allocator, max_headers),
+    pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !Response {
+        return Response{
+            .headers = try Headers.initCapacity(allocator, max_headers),
             .body = try Bytes.initCapacity(allocator, buffer_size),
         };
     }
 
     // Reset the request so it can be reused without reallocating memory
-    pub fn reset(self: *HttpResponse) void {
+    pub fn reset(self: *Response) void {
         self.body.len = 0;
         self.headers.reset();
         self.status = responses.OK;
@@ -55,11 +55,11 @@ pub const HttpResponse = struct {
 
     // Write into the body buffer
     pub fn writeFn(out_stream: *std.io.BufferOutStream.Stream, bytes: []const u8) !void {
-        const self = @fieldParentPtr(HttpResponse, "stream", out_stream);
+        const self = @fieldParentPtr(Response, "stream", out_stream);
         return self.body.appendSlice(bytes);
     }
 
-    pub fn deinit(self: *HttpResponse) void {
+    pub fn deinit(self: *Response) void {
         self.headers.deinit();
         self.body.deinit();
     }

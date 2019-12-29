@@ -35,7 +35,7 @@ pub fn parseRequests(file: fs.File) !usize {
     const allocator = std.heap.direct_allocator;
     var stream = try web.IOStream.initCapacity(allocator, file, 0, 4096);
     defer stream.deinit();
-    var request = try web.HttpRequest.init(allocator);
+    var request = try web.Request.init(allocator);
     defer request.deinit();
     var cnt: usize = 0;
     while (true) {

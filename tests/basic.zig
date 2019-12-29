@@ -34,7 +34,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
     const allocator = std.heap.direct_allocator;
     var stream = try web.IOStream.initCapacity(allocator, conn.file, 0, 4096);
     defer stream.deinit();
-    var request = try web.HttpRequest.init(allocator);
+    var request = try web.Request.init(allocator);
     defer request.deinit();
     var cnt: usize = 0;
     while (true) {

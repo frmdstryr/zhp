@@ -7,7 +7,7 @@ const time = std.time;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const HttpHeaders = @import("headers.zig").HttpHeaders;
+const Headers = @import("headers.zig").Headers;
 const IOStream = @import("util.zig").IOStream;
 
 
@@ -46,7 +46,7 @@ inline fn isTokenChar(ch: u8) bool {
 pub const Bytes = std.ArrayList(u8);
 
 
-pub const HttpRequest = struct {
+pub const Request = struct {
     pub const Method = enum {
         Get,
         Put,
@@ -94,7 +94,7 @@ pub const HttpRequest = struct {
     content_length: usize = 0,
 
     // All headers
-    headers: HttpHeaders,
+    headers: Headers,
 
     // Body of request
     body: []const u8 = "",
@@ -117,29 +117,29 @@ pub const HttpRequest = struct {
     // Constructors
     // ------------------------------------------------------------------------
 
-    pub fn init(allocator: *Allocator) !HttpRequest {
-        return HttpRequest{
+    pub fn init(allocator: *Allocator) !Request {
+        return Request{
             .buffer = try Bytes.initCapacity(allocator, mem.page_size),
-            .headers = try HttpHeaders.initCapacity(allocator, 64),
+            .headers = try Headers.initCapacity(allocator, 64),
         };
     }
 
     pub fn initCapacity(allocator: *Allocator, buffer_size: usize,
-                        max_headers: usize) !HttpRequest {
-        return HttpRequest{
+                        max_headers: usize) !Request {
+        return Request{
             .buffer = try Bytes.initCapacity(allocator, buffer_size),
-            .headers = try HttpHeaders.initCapacity(allocator, max_headers),
+            .headers = try Headers.initCapacity(allocator, max_headers),
         };
     }
 
     // ------------------------------------------------------------------------
     // Testing
     // ------------------------------------------------------------------------
-    pub fn initTest(allocator: *Allocator, stream: *IOStream) !HttpRequest {
+    pub fn initTest(allocator: *Allocator, stream: *IOStream) !Request {
         //if (!builtin.is_test) @compileError("This is for testing only");
-        return HttpRequest{
+        return Request{
             .buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer),
-            .headers = try HttpHeaders.initCapacity(allocator, 64),
+            .headers = try Headers.initCapacity(allocator, 64),
         };
     }
 
@@ -149,16 +149,19 @@ pub const HttpRequest = struct {
 
     // Parse using default sizes
     // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
-    pub fn parse(self: *HttpRequest, stream: *IOStream) !usize {
+    pub fn parse(self: *Request, stream: *IOStream) !usize {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
         try self.buffer.resize(mem.page_size);
         stream.swapBuffer(self.buffer.toSlice());
+
+        // TODO: This should retry if the error is EndOfBuffer which means
+        // it got a partial request
         try stream.fillBuffer();
         return self.parseNoSwap(stream);
     }
 
-    inline fn parseNoSwap(self: *HttpRequest, stream: *IOStream) !usize {
+    inline fn parseNoSwap(self: *Request, stream: *IOStream) !usize {
         const start = stream.readCount();
 
         // FIXME make these configurable
@@ -174,7 +177,7 @@ pub const HttpRequest = struct {
     // Based on picohttpparser
     // FIXME: Use readByte instead of readByteFast
     // readByteFast is 3x faster but doesn't handle slowloris
-    pub inline fn parseRequestLine(self: *HttpRequest, stream: *IOStream, max_size: usize) !void {
+    pub inline fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
         const buf = &self.buffer;
 
         // FIXME: If the whole method is not in the initial read
@@ -284,7 +287,7 @@ pub const HttpRequest = struct {
 
     // Parse the url, this populates, the uri, host, scheme, and query
     // when available. The trailing space is consumed.
-    pub inline fn parseUri(self: *HttpRequest, stream: *IOStream, max_size: usize) !void {
+    pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
         const buf = self.buffer.toSlice();
         const index = stream.readCount();
 
@@ -347,7 +350,7 @@ pub const HttpRequest = struct {
         self.uri = buf[index..end];
     }
 
-    pub inline fn parseUriPath(self: *HttpRequest, stream: *IOStream, max_size: usize) !usize {
+    pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
         const buf = self.buffer.toSlice();
         const index = stream.readCount()-1;
         var query_start: ?usize = null;
@@ -373,7 +376,7 @@ pub const HttpRequest = struct {
         return end;
     }
 
-    pub inline fn parseHeaders(self: *HttpRequest, stream: *IOStream, max_size: usize) !void {
+    pub inline fn parseHeaders(self: *Request, stream: *IOStream, max_size: usize) !void {
         const headers = &self.headers;
 
         // Reuse the request buffer for this
@@ -381,12 +384,11 @@ pub const HttpRequest = struct {
         var index: usize = undefined;
         var key: ?[]u8 = null;
         var value: ?[]u8 = null;
-        var ch: u8 = 0;
 
         // Strip any whitespace
         while (headers.items.len < headers.items.capacity()) {
             // TODO: This assumes that the whole header in the buffer
-            ch = try stream.readByteFast();
+            var ch = try stream.readByteFast();
 
             switch (ch) {
                 '\r' => {
@@ -457,7 +459,7 @@ pub const HttpRequest = struct {
         }
     }
 
-    pub inline fn parseContentLength(self: *HttpRequest, max_size: usize) !void {
+    pub inline fn parseContentLength(self: *Request, max_size: usize) !void {
         var headers = &self.headers;
         // Read content length
         if (!headers.contains("Content-Length")) {
@@ -477,9 +479,8 @@ pub const HttpRequest = struct {
         // duplicated.  If all the values are identical then we can
         // use them but if they differ it's an error.
         var it = mem.separate(content_length_header, ",");
-        while (it.next()) |piece| {
+        if (it.next()) |piece| {
             try headers.put("Content-Length", piece);
-            break; // TODO: Just use the first
         }
 
         self.content_length = std.fmt.parseInt(u32, content_length_header, 10)
@@ -490,7 +491,7 @@ pub const HttpRequest = struct {
         }
     }
 
-    //pub fn parseCookie(self: *HttpRequest) !void {
+    //pub fn parseCookie(self: *Request) !void {
     //    // TODO Do while parsing headers
     //}
 
@@ -501,7 +502,7 @@ pub const HttpRequest = struct {
 
     // Reset the request to it's initial state so it can be reused
     // without needing to reallocate. Usefull when using an ObjectPool
-    pub fn reset(self: *HttpRequest) void {
+    pub fn reset(self: *Request) void {
         self.method = .Unknown;
         self.scheme = .Unknown;
         self.path = "";
@@ -518,7 +519,7 @@ pub const HttpRequest = struct {
         self.buffer.len = 0;
     }
 
-    pub fn deinit(self: *HttpRequest) void {
+    pub fn deinit(self: *Request) void {
         self.buffer.deinit();
         self.headers.deinit();
     }
@@ -573,21 +574,21 @@ test "parse-request-line" {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
-    var request = try HttpRequest.initTest(allocator, &stream);
+    var request = try Request.initTest(allocator, &stream);
     stream.startTest();
     _ = try request.parseNoSwap(&stream);
 
-    testing.expectEqual(request.method, HttpRequest.Method.Get);
-    testing.expectEqual(request.version, HttpRequest.Version.Http1_1);
+    testing.expectEqual(request.method, Request.Method.Get);
+    testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
 
     stream = try IOStream.initTest(allocator, TEST_GET_2);
-    request = try HttpRequest.initTest(allocator, &stream);
+    request = try Request.initTest(allocator, &stream);
     stream.startTest();
     _ = try request.parseNoSwap(&stream);
-    testing.expectEqual(request.method, HttpRequest.Method.Get);
-    testing.expectEqual(request.version, HttpRequest.Version.Http1_1);
+    testing.expectEqual(request.method, Request.Method.Get);
+    testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
         "/pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500");
     testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
@@ -595,11 +596,11 @@ test "parse-request-line" {
         "id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500");
 
     stream = try IOStream.initTest(allocator, TEST_POST_1);
-    request = try HttpRequest.initTest(allocator, &stream);
+    request = try Request.initTest(allocator, &stream);
     stream.startTest();
     _ = try request.parseNoSwap(&stream);
-    testing.expectEqual(request.method, HttpRequest.Method.Post);
-    testing.expectEqual(request.version, HttpRequest.Version.Http1_1);
+    testing.expectEqual(request.method, Request.Method.Post);
+    testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
         "https://bs.serving-sys.com/BurstingPipe/adServer.bs?cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1");
     testing.expectEqualSlices(u8, request.host, "bs.serving-sys.com");
@@ -614,7 +615,7 @@ test "parse-request-multiple" {
     const allocator = &fba.allocator;
     const REQUESTS = TEST_GET_1 ++ TEST_GET_2 ++ TEST_POST_1;
     var stream = try IOStream.initTest(allocator, REQUESTS);
-    var request = try HttpRequest.initTest(allocator, &stream);
+    var request = try Request.initTest(allocator, &stream);
     stream.startTest();
 
     var n = try request.parseNoSwap(&stream);
@@ -633,7 +634,7 @@ test "bench-parse-request-line" {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
-    var request = try HttpRequest.initTest(allocator, &stream);
+    var request = try Request.initTest(allocator, &stream);
 
     const requests: usize = 1000000;
     var n: usize = 0;
@@ -657,11 +658,11 @@ test "bench-parse-request-line" {
         .{requests/ms, bytes/ms, ns/requests});
 
     //stream.load("POST CRAP");
-    //request = try HttpRequest.init(allocator);
+    //request = try Request.init(allocator);
     //testing.expectError(error.BadRequest,
     //    request.parseRequestLine(&stream, 0));
 
-//     var line = try HttpRequest.StartLine.parse(a, "GET /foo HTTP/1.1");
+//     var line = try Request.StartLine.parse(a, "GET /foo HTTP/1.1");
 //     testing.expect(mem.eql(u8, line.method, "GET"));
 //     testing.expect(mem.eql(u8, line.path, "/foo"));
 //     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
@@ -694,7 +695,7 @@ test "parse-request-headers" {
         \\
         \\
     );
-    var request = try HttpRequest.initTest(allocator, &stream);
+    var request = try Request.initTest(allocator, &stream);
     stream.startTest();
     _ = try request.parseNoSwap(&stream);
     var h = &request.headers;
@@ -715,7 +716,7 @@ test "parse-request-headers" {
 
     // Next
     try stream.load(allocator, TEST_GET_1);
-    request = try HttpRequest.initTest(allocator, &stream);
+    request = try Request.initTest(allocator, &stream);
     _ = try request.parseNoSwap(&stream);
     h = &request.headers;
 
@@ -750,7 +751,7 @@ test "bench-parse-request-headers" {
     const allocator = &fba.allocator;
 
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
-    var request = try HttpRequest.initTest(allocator, &stream);
+    var request = try Request.initTest(allocator, &stream);
 
     const requests: usize = 1000000;
     var n: usize = 0;

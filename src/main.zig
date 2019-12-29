@@ -6,9 +6,9 @@ pub const io_mode = .evented;
 const MainHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *MainHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
-        try response.headers.put("Content-Type", "text/plain");
+    pub fn get(self: *MainHandler, request: *web.Request,
+               response: *web.Response) !void {
+        try response.headers.append("Content-Type", "text/plain");
         try response.stream.write("Hello, World!");
     }
 
@@ -18,10 +18,10 @@ const StreamHandler = struct {
     handler: web.RequestHandler,
 
     // Dump a random stream of crap
-    pub fn get(self: *StreamHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
-        try response.headers.put("Content-Type", "application/octet-stream");
-        try response.headers.put("Content-Disposition",
+    pub fn get(self: *StreamHandler, request: *web.Request,
+               response: *web.Response) !void {
+        try response.headers.append("Content-Type", "application/octet-stream");
+        try response.headers.append("Content-Disposition",
             "attachment; filename=\"random.bin\"");
         //try response.headers.put("Content-Length", "4096000");
 
@@ -42,9 +42,9 @@ const StreamHandler = struct {
 const JsonHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *JsonHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
-        try response.headers.put("Content-Type", "application/json");
+    pub fn get(self: *JsonHandler, request: *web.Request,
+               response: *web.Response) !void {
+        try response.headers.append("Content-Type", "application/json");
         // TODO: dump object to json?
         try response.stream.write("{\"message\": \"Hello, World!\"}");
     }
@@ -54,8 +54,8 @@ const JsonHandler = struct {
 const ErrorTestHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *ErrorTestHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
+    pub fn get(self: *ErrorTestHandler, request: *web.Request,
+               response: *web.Response) !void {
         try response.stream.write("Do some work");
         return error.Ooops;
     }
@@ -67,8 +67,8 @@ const ErrorTestHandler = struct {
 const FormHandler = struct {
     handler: web.RequestHandler,
 
-    pub fn get(self: *FormHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
+    pub fn get(self: *FormHandler, request: *web.Request,
+               response: *web.Response) !void {
         try response.stream.write(
             \\<form action="/form/" method="post" enctype="multipart/form-data">
             \\<input type="text" name="description" value="some text">
@@ -78,8 +78,8 @@ const FormHandler = struct {
         );
     }
 
-    pub fn post(self: *FormHandler, request: *web.HttpRequest,
-               response: *web.HttpResponse) !void {
+    pub fn post(self: *FormHandler, request: *web.Request,
+               response: *web.Response) !void {
         try response.stream.write(
             \\<h1>Thanks!</h1>
         );

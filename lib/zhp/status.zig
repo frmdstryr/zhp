@@ -2,13 +2,13 @@ const testing = std.testing;
 
 // Supported, IANA-registered status codes available
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
-pub const HttpStatus = struct {
+pub const Status = struct {
     code: u16,
     phrase: []const u8,
     description: []const u8,
 
-    pub fn create(code: u16, phrase: []const u8, desc: []const u8) HttpStatus {
-        return HttpStatus{
+    pub fn create(code: u16, phrase: []const u8, desc: []const u8) Status {
+        return Status{
             .code = code,
             .phrase = phrase,
             .description = desc,
@@ -16,7 +16,7 @@ pub const HttpStatus = struct {
     }
 };
 
-pub const create = HttpStatus.create;
+pub const create = Status.create;
 
 // Informational
 pub const CONTINUE = create(100, "Continue", "Request received, please continue");
@@ -92,7 +92,7 @@ pub const NETWORK_AUTHENTICATION_REQUIRED = create(511, "Network Authentication 
 
 
 /// Lookup the status for the given code
-pub fn get(status_code: u16) ?HttpStatus {
+pub fn get(status_code: u16) ?Status {
     return switch (status_code) {
         100 => CONTINUE,
         101 => SWITCHING_PROTOCOLS,
@@ -159,7 +159,7 @@ pub fn get(status_code: u16) ?HttpStatus {
 
 
 /// Lookup the status for the given code or create one with the given phrase
-pub fn getOrCreate(status_code: u16, phrase: []const u8) HttpStatus {
+pub fn getOrCreate(status_code: u16, phrase: []const u8) Status {
     return get(status_code) orelse create(status_code, phrase, "");
 }
 
