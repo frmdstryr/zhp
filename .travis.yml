@@ -13,17 +13,17 @@ before_install:
     # Pull wrk
     - docker pull williamyeh/wrk
 
-    # Make sure this repo builds
-    - zig build -Drelease-fast=true install
-
 script:
-    # Test request parser
+    # Test individual files
     - zig test --release-fast lib/zhp/status.zig
     - zig test --release-fast lib/zhp/headers.zig
     - zig test --release-fast lib/zhp/middleware.zig
     - zig test --release-fast lib/zhp/mimetypes.zig
     - zig test --release-fast lib/zhp/time/datetime.zig
     - zig test --release-fast lib/zhp/request.zig
+
+    # Make sure this repo builds
+    - zig build -Drelease-fast=true install
 
     # Test example server
     - zig run tests/bench.zig

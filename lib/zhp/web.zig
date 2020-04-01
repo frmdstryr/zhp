@@ -24,8 +24,6 @@ const handlers = @import("handlers.zig");
 const Datetime = @import("time/datetime.zig").Datetime;
 const mimetypes = @import("mimetypes.zig");
 
-// Does not help...
-//pub const signals = @import("signals.zig");
 
 pub const util = @import("util.zig");
 pub const IOStream = util.IOStream;
@@ -302,7 +300,7 @@ pub const ServerConnection = struct {
         try request.buffer.resize(request.content_length + end_of_request);
 
         // Anything else is the body
-        var body = request.buffer.toSlice()[end_of_request..];
+        var body = request.buffer.span()[end_of_request..];
 
         // Take whatever is still buffered
         const amt = stream.consumeBuffered(request.content_length);
@@ -348,7 +346,7 @@ pub const ServerConnection = struct {
         });
 
         // Write headers
-        for (response.headers.toSlice()) |header| {
+        for (response.headers.span()) |header| {
             try stream.print("{}: {}\r\n", .{header.key, header.value});
         }
 
@@ -381,7 +379,7 @@ pub const ServerConnection = struct {
             // Send the stream
             total_wrote = try stream.writeFromInStream(in_stream);
         } else if (response.body.len > 0) {
-            try stream.write(response.body.toSlice());
+            try stream.write(response.body.span());
             total_wrote += response.body.len;
         }
 
@@ -770,7 +768,7 @@ pub const Application = struct {
         // the request body has not yet been read at this point
         // if the middleware returns true the response is considered to be
         // handled and request processing stops here
-        for (self.middleware.toSlice()) |middleware| {
+        for (self.middleware.span()) |middleware| {
             var done = try middleware.processRequest(request, response);
             if (done) return null;
         }
@@ -795,7 +793,7 @@ pub const Application = struct {
             try Datetime.formatHttpFromTimestamp(
                 response.allocator, time.milliTimestamp()));
 
-        for (self.middleware.toSlice()) |middleware| {
+        for (self.middleware.span()) |middleware| {
             try middleware.processResponse(request, response);
         }
     }
@@ -807,7 +805,7 @@ pub const Application = struct {
         const lock = self.connection_pool.lock.acquire();
         defer lock.release();
         var n: usize = 0;
-        for (self.connection_pool.objects.toSlice()) |server_conn| {
+        for (self.connection_pool.objects.span()) |server_conn| {
             if (!server_conn.io.closed) continue;
             server_conn.io.close();
             n += 1;
