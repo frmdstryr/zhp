@@ -1,3 +1,8 @@
+// -------------------------------------------------------------------------- //
+// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Distributed under the terms of the MIT License.                            //
+// The full license is in the file LICENSE, distributed with this software.   //
+// -------------------------------------------------------------------------- //
 
 pub const HttpFile = struct {
     // Represents a file uploaded via a form.

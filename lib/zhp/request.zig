@@ -1,3 +1,8 @@
+// -------------------------------------------------------------------------- //
+// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Distributed under the terms of the MIT License.                            //
+// The full license is in the file LICENSE, distributed with this software.   //
+// -------------------------------------------------------------------------- //
 const std = @import("std");
 const builtin = @import("builtin");
 const ascii = std.ascii;
@@ -15,6 +20,12 @@ inline fn isCtrlChar(ch: u8) bool {
     return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
 }
 
+
+test "is-control-char" {
+    testing.expect(isCtrlChar('A') == false);
+    testing.expect(isCtrlChar('\t') == false);
+    testing.expect(isCtrlChar('\r') == true);
+}
 
 const token_map = [_]u1{
     //  0, 1, 2, 3, 4, 5, 6, 7 ,8, 9,10,11,12,13,14,15
@@ -153,7 +164,7 @@ pub const Request = struct {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
         try self.buffer.resize(mem.page_size);
-        stream.swapBuffer(self.buffer.toSlice());
+        stream.swapBuffer(self.buffer.span());
 
         // TODO: This should retry if the error is EndOfBuffer which means
         // it got a partial request
@@ -170,7 +181,7 @@ pub const Request = struct {
         try self.parseContentLength(100*1024*1024);
 
         const end = stream.readCount();
-        self.head = self.buffer.toSlice()[start..end];
+        self.head = self.buffer.span()[start..end];
         return end-start;
     }
 
@@ -288,7 +299,7 @@ pub const Request = struct {
     // Parse the url, this populates, the uri, host, scheme, and query
     // when available. The trailing space is consumed.
     pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
-        const buf = self.buffer.toSlice();
+        const buf = self.buffer.span();
         const index = stream.readCount();
 
         var ch = try stream.readByteFast();
@@ -351,7 +362,7 @@ pub const Request = struct {
     }
 
     pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
-        const buf = self.buffer.toSlice();
+        const buf = self.buffer.span();
         const index = stream.readCount()-1;
         var query_start: ?usize = null;
         while (stream.readCount() < max_size) {
@@ -414,7 +425,7 @@ pub const Request = struct {
                     }
 
                     // Header name
-                    key = buf.toSlice()[index..stream.readCount()-1];
+                    key = buf.span()[index..stream.readCount()-1];
 
                     // Strip whitespace
                     while (stream.readCount() < max_size) {
@@ -432,8 +443,8 @@ pub const Request = struct {
             }
 
             // TODO: Strip trailing spaces and tabs
-            value = buf.toSlice()[index..stream.readCount()-1];
-            //value = buf.toSlice()[index..buf.len];
+            value = buf.span()[index..stream.readCount()-1];
+            //value = buf.span()[index..buf.len];
 
             // Ignore any remaining non-print characters
             while (stream.readCount() < max_size) {
@@ -569,7 +580,7 @@ const TEST_POST_1 =
     \\
 ;
 
-test "parse-request-line" {
+test "01-parse-request-line" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -609,7 +620,7 @@ test "parse-request-line" {
 
 }
 
-test "parse-request-multiple" {
+test "02-parse-request-multiple" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -629,7 +640,7 @@ test "parse-request-multiple" {
 
 }
 
-test "bench-parse-request-line" {
+test "03-bench-parse-request-line" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -679,7 +690,7 @@ test "bench-parse-request-line" {
 //             RequestStartLine.parse(a, "POST / HTTP/2.0"));
 }
 
-test "parse-request-headers" {
+test "04-parse-request-headers" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -714,6 +725,7 @@ test "parse-request-headers" {
     testing.expectEqualSlices(u8, "keep-alive",
         try h.get("Connection"));
 
+
     // Next
     try stream.load(allocator, TEST_GET_1);
     request = try Request.initTest(allocator, &stream);
@@ -745,7 +757,7 @@ test "parse-request-headers" {
 
 }
 
-test "bench-parse-request-headers" {
+test "05-bench-parse-request-headers" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -758,6 +770,10 @@ test "bench-parse-request-headers" {
     var timer = try std.time.Timer.start();
     var i: usize = 0; // 1M
     while (i < requests) : (i += 1) {
+        // HACK: For testing we "fake" filling the buffer...
+        // since this test is only concerned with the parser speed
+        request.buffer.len = TEST_GET_1.len;
+
         //     1031k req/s 725MB/s (969 ns/req)
         n = try request.parseNoSwap(&stream);
         request.reset();

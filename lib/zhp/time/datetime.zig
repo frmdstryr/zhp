@@ -9,7 +9,7 @@ const std = @import("std");
 const time = std.time;
 const math = std.math;
 
-const Compare = std.mem.Compare;
+const Order = std.math.Order;
 
 const timezones = @import("timezones.zig");
 
@@ -153,8 +153,6 @@ pub const Date = struct {
     month: u4 = 1, // Month of year
     day: u8 = 1, // Day of month
 
-    validated: u1 = @compileError("A Date must be created using Date.create"),
-
     // Create and validate the date
     pub fn create(year: u32, month: u32, day: u32) ! Date {
         if (year < MIN_YEAR or year > MAX_YEAR) return error.InvalidDate;
@@ -165,7 +163,6 @@ pub const Date = struct {
             .year = @intCast(u16, year),
             .month = @intCast(u4, month),
             .day = @intCast(u8, day),
-            .validated = 1,
         };
     }
 
@@ -291,33 +288,33 @@ pub const Date = struct {
     // ------------------------------------------------------------------------
     // Comparisons
     pub fn eql(self: Date, other: Date) bool {
-        return self.cmp(other) == Compare.Equal;
+        return self.cmp(other) == .eq;
     }
 
-    pub fn cmp(self: Date, other: Date) Compare {
-        if (self.year > other.year) return .GreaterThan;
-        if (self.year < other.year) return .LessThan;
-        if (self.month > other.month) return .GreaterThan;
-        if (self.month < other.month) return .LessThan;
-        if (self.day > other.day) return .GreaterThan;
-        if (self.day < other.day) return .LessThan;
-        return .Equal;
+    pub fn cmp(self: Date, other: Date) Order {
+        if (self.year > other.year) return .gt;
+        if (self.year < other.year) return .lt;
+        if (self.month > other.month) return .gt;
+        if (self.month < other.month) return .lt;
+        if (self.day > other.day) return .gt;
+        if (self.day < other.day) return .lt;
+        return .eq;
     }
 
     pub fn gt(self: Date, other: Date) bool {
-        return self.cmp(other) == Compare.GreaterThan;
+        return self.cmp(other) == .gt;
     }
     pub fn gte(self: Date, other: Date) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.GreaterThan;
+        return r == .eq or r == .gt;
     }
     pub fn lt(self: Date, other: Date) bool {
-        return self.cmp(other) == Compare.LessThan;
+        return self.cmp(other) == .lt;
     }
 
     pub fn lte(self: Date, other: Date) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.LessThan;
+        return r == .eq or r == .lt;
     }
 
     // ------------------------------------------------------------------------
@@ -679,35 +676,35 @@ pub const Time = struct {
     // Comparisons
     // -----------------------------------------------------------------------
     pub fn eql(self: Time, other: Time) bool {
-        return self.cmp(other) == Compare.Equal;
+        return self.cmp(other) == .eq;
     }
 
-    pub fn cmp(self: Time, other: Time) Compare {
+    pub fn cmp(self: Time, other: Time) Order {
         var t1 = self.totalSeconds();
         var t2 = other.totalSeconds();
-        if (t1 > t2) return .GreaterThan;
-        if (t1 < t2) return .LessThan;
-        if (self.microsecond > other.microsecond) return .GreaterThan;
-        if (self.microsecond < other.microsecond) return .LessThan;
-        return .Equal;
+        if (t1 > t2) return .gt;
+        if (t1 < t2) return .lt;
+        if (self.microsecond > other.microsecond) return .gt;
+        if (self.microsecond < other.microsecond) return .lt;
+        return .eq;
     }
 
     pub fn gt(self: Time, other: Time) bool {
-        return self.cmp(other) == Compare.GreaterThan;
+        return self.cmp(other) == .gt;
     }
 
     pub fn gte(self: Time, other: Time) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.GreaterThan;
+        return r == .eq or r == .gt;
     }
 
     pub fn lt(self: Time, other: Time) bool {
-        return self.cmp(other) == Compare.LessThan;
+        return self.cmp(other) == .lt;
     }
 
     pub fn lte(self: Time, other: Time) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.LessThan;
+        return r == .eq or r == .lt;
     }
 
     // -----------------------------------------------------------------------
@@ -924,33 +921,33 @@ pub const Datetime = struct {
     // Comparisons
     // -----------------------------------------------------------------------
     pub fn eql(self: Datetime, other: Datetime) bool {
-        return self.cmp(other) == Compare.Equal;
+        return self.cmp(other) == .eq;
     }
 
-    pub fn cmp(self: Datetime, other: Datetime) Compare {
+    pub fn cmp(self: Datetime, other: Datetime) Order {
         var r = self.date.cmp(other.date);
-        if (r != .Equal) return r;
+        if (r != .eq) return r;
         r = self.time.cmp(other.time);
-        if (r != .Equal) return r;
-        return .Equal;
+        if (r != .eq) return r;
+        return .eq;
     }
 
     pub fn gt(self: Datetime, other: Datetime) bool {
-        return self.cmp(other) == Compare.GreaterThan;
+        return self.cmp(other) == .gt;
     }
 
     pub fn gte(self: Datetime, other: Datetime) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.GreaterThan;
+        return r == .eq or r == .gt;
     }
 
     pub fn lt(self: Datetime, other: Datetime) bool {
-        return self.cmp(other) == Compare.LessThan;
+        return self.cmp(other) == .lt;
     }
 
     pub fn lte(self: Datetime, other: Datetime) bool {
         const r = self.cmp(other);
-        return r == Compare.Equal or r == Compare.LessThan;
+        return r == .eq or r == .lt;
     }
 
     // -----------------------------------------------------------------------

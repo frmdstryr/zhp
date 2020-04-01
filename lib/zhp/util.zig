@@ -1,3 +1,8 @@
+// -------------------------------------------------------------------------- //
+// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Distributed under the terms of the MIT License.                            //
+// The full license is in the file LICENSE, distributed with this software.   //
+// -------------------------------------------------------------------------- //
 const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
@@ -44,8 +49,8 @@ pub const IOStream = struct {
                         in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_file = if (file) |f| f else try File.openRead("/dev/null"),
-            .out_file = if (file) |f| f else try File.openWrite("/dev/null"),
+            .in_file = if (file) |f| f else try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
+            .out_file = if (file) |f| f else try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
             .in_buffer = try allocator.alloc(u8, in_capacity),
             .out_buffer = try allocator.alloc(u8, out_capacity),
             ._in_start_index = in_capacity,
@@ -59,8 +64,8 @@ pub const IOStream = struct {
     pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_file = try File.openRead("/dev/null"),
-            .out_file = try File.openWrite("/dev/null"),
+            .in_file = try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
+            .out_file = try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
             .in_buffer = try mem.dupe(allocator, u8, in_buffer),
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,

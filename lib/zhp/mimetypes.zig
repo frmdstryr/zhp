@@ -1,3 +1,8 @@
+// -------------------------------------------------------------------------- //
+// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Distributed under the terms of the MIT License.                            //
+// The full license is in the file LICENSE, distributed with this software.   //
+// -------------------------------------------------------------------------- //
 const std = @import("std");
 const builtin = @import("builtin");
 const fs = std.fs;
@@ -190,10 +195,19 @@ fn replace(line: []u8, find: u8, replacement: u8) void {
     }
 }
 
+// Trim that doesn't require a const slice
+fn trim(slice: []u8, values: []const u8) []u8 {
+    var begin: usize = 0;
+    var end: usize = slice.len;
+    while (begin < end and mem.indexOfScalar(u8, values, slice[begin]) != null) : (begin += 1) {}
+    while (end > begin and mem.indexOfScalar(u8, values, slice[end - 1]) != null) : (end -= 1) {}
+    return slice[begin..end];
+}
+
 
 pub const Registry = struct {
     loaded: bool = false,
-    allocator: *Allocator,
+    arena: std.heap.ArenaAllocator,
 
     const StringMap = std.StringHashMap([]const u8);
     const StringArray = std.ArrayList([]const u8);
@@ -208,7 +222,7 @@ pub const Registry = struct {
     pub fn init(allocator: *Allocator) Registry {
         // Must call load separately to avoid https://github.com/ziglang/zig/issues/2765
         return Registry{
-            .allocator = allocator,
+            .arena = std.heap.ArenaAllocator.init(allocator),
             .type_map = StringMap.init(allocator),
             .type_map_inv = StringArrayMap.init(allocator),
         };
@@ -218,21 +232,23 @@ pub const Registry = struct {
     // this copies both and will overwrite any existing entries
     pub fn addType(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
         // Add '.' if necessary
+        const allocator = &self.arena.allocator;
         const extension =
             if (mem.startsWith(u8, ext, "."))
-                try mem.dupe(self.allocator, u8, mem.trim(u8, ext, WS))
+                try mem.dupe(allocator, u8, mem.trim(u8, ext, WS))
             else
-                try mem.concat(self.allocator, u8,
+                try mem.concat(allocator, u8,
                     &[_][]const u8{".", mem.trim(u8, ext, WS)});
         return self.addTypeInternal(
             extension,
-            try mem.dupe(self.allocator, u8, mem.trim(u8, mime_type, WS)));
+            try mem.dupe(allocator, u8, mem.trim(u8, mime_type, WS)));
     }
 
     // Add a mapping between a type and an extension.
     // this assumes the entries added are already owend
     fn addTypeInternal(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
         // std.debug.warn("  adding {}: {} to registry...\n", .{ext, mime_type});
+        const allocator = &self.arena.allocator;
         _ = try self.type_map.put(ext, mime_type);
 
         if (self.type_map_inv.getValue(mime_type)) |extensions| {
@@ -243,8 +259,8 @@ pub const Registry = struct {
             try extensions.append(ext);
         } else {
             // Create a new list of extensions
-            const extensions = try self.allocator.create(StringArray);
-            extensions.* = StringArray.init(self.allocator);
+            const extensions = try allocator.create(StringArray);
+            extensions.* = StringArray.init(allocator);
             _ = try self.type_map_inv.put(mime_type, extensions);
             try extensions.append(ext);
         }
@@ -259,7 +275,7 @@ pub const Registry = struct {
         }
 
         // Load from system
-        if (builtin.os == .windows) {
+        if (builtin.os.tag == .windows) {
             // TODO: Windows
         } else {
             try self.loadRegistryLinux();
@@ -268,7 +284,7 @@ pub const Registry = struct {
 
     pub fn loadRegistryLinux(self: *Registry) !void {
         for (known_files) |path| {
-            var file = fs.File.openRead(path) catch |err| continue;
+            var file = fs.openFileAbsolute(path, .{.read=true}) catch |err| continue;
             // std.debug.warn("Loading {}...\n", .{path});
             try self.loadRegistryFile(file);
         }
@@ -276,15 +292,12 @@ pub const Registry = struct {
 
     // Read a single mime.types-format file.
     pub fn loadRegistryFile(self: *Registry, file: fs.File) !void {
-        const stream = &std.io.BufferedInStream(
-            fs.File.ReadError).init(&file.inStream().stream).stream;
+        var stream = &std.io.bufferedInStream(file.inStream()).inStream();
         var buf: [1024]u8 = undefined;
         while (true) {
             const result = try stream.readUntilDelimiterOrEof(&buf, '\n');
             if (result == null) break; // EOF
-            var line = result.?;
-
-            line = mem.trim(u8, line, WS);
+            var line = trim(result.?, WS);
 
             // Strip comments
             const end = mem.indexOf(u8, line, "#") orelse line.len;
@@ -322,23 +335,13 @@ pub const Registry = struct {
 
     pub fn deinit(self: *Registry) void {
         // Free type
-        var it = self.type_map.iterator();
-        while (it.next()) |entry| {
-            self.allocator.free(entry.key);
-            self.allocator.free(entry.value);
-        }
         self.type_map.deinit();
 
         // Free the type map
-        var iter = self.type_map_inv.iterator();
-        while (iter.next()) |entry| {
-            self.allocator.free(entry.key);
-            for (entry.value.toSlice()) |str| {
-                self.allocator.free(str);
-            }
-            entry.value.deinit();
-        }
         self.type_map_inv.deinit();
+
+        // And free anything else
+        self.arena.deinit();
     }
 
 };
