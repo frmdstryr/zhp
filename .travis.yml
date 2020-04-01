@@ -20,7 +20,10 @@ script:
     - zig test --release-fast lib/zhp/middleware.zig
     - zig test --release-fast lib/zhp/mimetypes.zig
     - zig test --release-fast lib/zhp/time/datetime.zig
+    - zig test --release-fast lib/zhp/util.zig
     - zig test --release-fast lib/zhp/request.zig
+    - zig test --release-fast lib/zhp/response.zig
+
 
     # Make sure this repo builds
     - zig build -Drelease-fast=true install

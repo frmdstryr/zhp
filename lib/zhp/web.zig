@@ -62,6 +62,11 @@ pub const ServerRequest = struct {
     // This should be in init but doesn't work due to return results being copied
     pub fn prepare(self: *ServerRequest) void {
         self.buffer = std.heap.FixedBufferAllocator.init(self.storage);
+
+        // Setup the stream
+        self.response.prepare();
+
+        // Replace the allocator so request handlers have limited memory
         self.response.allocator = &self.buffer.allocator;
     }
 
@@ -135,9 +140,9 @@ pub const ServerConnection = struct {
         self.address = conn.address;
         const app = self.application;
         const params = &app.options;
-        const stream = &self.io;
-        stream.reinit(conn.file);
-        defer stream.close();
+        const stream = &self.io.outStream();
+        self.io.reinit(conn.file);
+        defer self.io.close();
         defer self.release();
 
         // Grab a request
@@ -164,25 +169,25 @@ pub const ServerConnection = struct {
             defer server_request.reset();
 
             // Parse the request line and headers
-            const n = request.parse(stream) catch |err| switch (err) {
+            const n = request.parse(&self.io) catch |err| switch (err) {
                 error.BadRequest => {
-                    try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
                     return;
                 },
                 error.MethodNotAllowed => {
-                    try stream.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
+                    _= try stream.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
                     return;
                 },
                 error.RequestEntityTooLarge => {
-                    try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
                     return;
                 },
                 error.RequestUriTooLong => {
-                    try stream.write("HTTP/1.1 413 Request-URI Too Long\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 413 Request-URI Too Long\r\n\r\n");
                     return;
                 },
                 error.RequestHeaderFieldsTooLarge => {
-                    try stream.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
                     return;
                 },
                 //error.TimeoutError,
@@ -200,11 +205,11 @@ pub const ServerConnection = struct {
             self.readBody(request, response) catch |err| switch(err) {
                 //error.ImproperlyTerminatedChunk,
                 error.BadRequest => {
-                    try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
                     return;
                 },
                 error.RequestEntityTooLarge => {
-                    try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
+                    _ = try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
                     return;
                 },
                 // error.TimeoutError,
@@ -232,9 +237,9 @@ pub const ServerConnection = struct {
              try app.processResponse(self, request, response);
 
             // Request handler already sent the response
-            if (stream.closed or response.finished) return;
+            if (self.io.closed or response.finished) return;
             try self.sendResponse(request, response);
-            if (stream.closed or !keep_alive) return;
+            if (self.io.closed or !keep_alive) return;
         }
     }
 
@@ -291,7 +296,7 @@ pub const ServerConnection = struct {
 
     fn readFixedBody(self: *ServerConnection, request: *Request) !void {
         const params = &self.application.options;
-        const stream = &self.io;
+        const stream = &self.io.inStream();
 
         // End of the request
         const end_of_request = request.head.len;
@@ -303,7 +308,7 @@ pub const ServerConnection = struct {
         var body = request.buffer.span()[end_of_request..];
 
         // Take whatever is still buffered
-        const amt = stream.consumeBuffered(request.content_length);
+        const amt = self.io.consumeBuffered(request.content_length);
 
         if (amt < request.content_length) {
             // We need to read more
@@ -312,8 +317,8 @@ pub const ServerConnection = struct {
             // Switch the stream to unbuffered mode and read directly to the request
             // buffer
             // TODO: Should do read in chunks
-            stream.readUnbuffered(true);
-            defer stream.readUnbuffered(false);
+            self.io.readUnbuffered(true);
+            defer self.io.readUnbuffered(false);
             try stream.readNoEof(buf);
         } // otherwise the body is already in the request buffer
 
@@ -325,7 +330,7 @@ pub const ServerConnection = struct {
     // Write the request
     pub fn sendResponse(self: *ServerConnection, request: *Request,
                         response: *Response) !void {
-        const stream = &self.io;
+        const stream = &self.io.outStream();
 
         // Finalize any headers
         if (request.version == .Http1_1 and response.disconnect_on_finish) {
@@ -352,7 +357,7 @@ pub const ServerConnection = struct {
 
         // Set default content type
         if (!response.headers.contains("Content-Type")) {
-            try stream.write("Content-Type: text/html\r\n");
+            _= try stream.write("Content-Type: text/html\r\n");
         }
 
         // Send content length if missing otherwise the client hangs reading
@@ -361,7 +366,7 @@ pub const ServerConnection = struct {
         }
 
         // End of headers
-        try stream.write("\r\n");
+        _= try stream.write("\r\n");
 
         // Write body
 //         if (response.chunking_output) {
@@ -372,19 +377,19 @@ pub const ServerConnection = struct {
 //         }
         var total_wrote: usize = 0;
         if (response.source_stream != null)  {
-            const in_stream = &response.source_stream.?.stream;
+            const in_stream = &response.source_stream.?;
 
             // Empty the output buffer
-            try stream.flush();
+            try self.io.flush();
             // Send the stream
-            total_wrote = try stream.writeFromInStream(in_stream);
+            total_wrote = try self.io.writeFromInStream(in_stream);
         } else if (response.body.len > 0) {
-            try stream.write(response.body.span());
+            _= try stream.write(response.body.span());
             total_wrote += response.body.len;
         }
 
         // Flush anything left
-        try stream.flush();
+        try self.io.flush();
 
         // Make sure the content-length was correct otherwise the client
         // will hang waiting
@@ -402,7 +407,7 @@ pub const ServerConnection = struct {
         // Closing the connection is the only way to avoid reading the
         // whole input body.
         if (!request.read_finished) {
-            stream.close();
+            self.io.close();
         }
 
         response.finished = true;
@@ -432,8 +437,7 @@ pub const RequestHandler = struct {
 
     // Request handler signature
     const request_handler = if (std.io.is_async)
-            // FIXME: This does not work
-            fn(self: *RequestHandler) anyerror!void
+            async fn(self: *RequestHandler) anyerror!void
         else
             fn(self: *RequestHandler) anyerror!void;
 
@@ -442,7 +446,7 @@ pub const RequestHandler = struct {
     // the request method
     pub fn execute(self: *RequestHandler) !void {
         if (std.io.is_async) {
-            var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [100*1024]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {}, self.dispatch, self);
         } else {
             try self.dispatch(self);
@@ -641,7 +645,7 @@ pub const Router = struct {
         return error.NotFound;
     }
 
-    pub fn reverseUrl(self: *Router, name: []const u8, args: ...) ![]const u8 {
+    pub fn reverseUrl(self: *Router, name: []const u8, args: var) ![]const u8 {
         for (self.routes) |route| {
             if (mem.eql(u8, route.name, name)) {
                 return route.path;
@@ -651,6 +655,8 @@ pub const Router = struct {
     }
 
 };
+
+
 
 
 
@@ -697,7 +703,10 @@ pub const Application = struct {
 
         // List of trusted downstream (ie proxy) servers
         trusted_downstream: ?[][]const u8 = null,
-        server_options: net.StreamServer.Options = net.StreamServer.Options{},
+        server_options: net.StreamServer.Options = net.StreamServer.Options{
+            .kernel_backlog = 1024,
+            .reuse_address = true,
+        },
 
         // Debugging
         debug: bool = false,

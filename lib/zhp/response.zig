@@ -11,8 +11,8 @@ const Status = @import("status.zig").Status;
 const Headers = @import("headers.zig").Headers;
 const Request = @import("request.zig").Request;
 
-
 pub const Bytes = std.ArrayList(u8);
+
 
 
 pub const Response = struct {
@@ -23,13 +23,13 @@ pub const Response = struct {
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
 
+    pub const WriteError = error{OutOfMemory};
+    pub const OutStream = std.io.OutStream(*Response, WriteError, Response.writeFn);
+
+    stream: OutStream = undefined,
+
     // Buffer for output body, if the response is too big use source_stream
     body: Bytes,
-
-    // Use this to print directly into the body buffer
-    stream: std.io.BufferOutStream.Stream = std.io.BufferOutStream.Stream{
-        .writeFn = Response.writeFn
-    },
 
     // If this is set, the response will read from the stream
     source_stream: ?std.fs.File.InStream = null,
@@ -39,9 +39,15 @@ pub const Response = struct {
 
     pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !Response {
         return Response{
+            .allocator = allocator,
             .headers = try Headers.initCapacity(allocator, max_headers),
             .body = try Bytes.initCapacity(allocator, buffer_size),
         };
+    }
+
+    // Must be called before writing
+    pub fn prepare(self: *Response) void {
+        self.stream = OutStream{.context = self};
     }
 
     // Reset the request so it can be reused without reallocating memory
@@ -53,15 +59,15 @@ pub const Response = struct {
         self.chunking_output = false;
         self.finished = false;
         if (self.source_stream) |stream| {
-            stream.file.close();
+            stream.context.close();
             self.source_stream = null;
         }
     }
 
     // Write into the body buffer
-    pub fn writeFn(out_stream: *std.io.BufferOutStream.Stream, bytes: []const u8) !void {
-        const self = @fieldParentPtr(Response, "stream", out_stream);
-        return self.body.appendSlice(bytes);
+    pub fn writeFn(self: *Response, bytes: []const u8) WriteError!usize {
+        try self.body.appendSlice(bytes);
+        return bytes.len;
     }
 
     pub fn deinit(self: *Response) void {
@@ -70,3 +76,19 @@ pub const Response = struct {
     }
 
 };
+
+
+test "response" {
+    const allocator = std.heap.page_allocator;
+    var response = try Response.initCapacity(allocator, 4096, 1096);
+    response.prepare();
+    defer response.deinit();
+    _ = try response.stream.write("Hello world!\n");
+    std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.span());
+
+    _ = try response.stream.print("{}\n", .{"Testing!"});
+    std.debug.warn("'{}'\n", .{response.body.span()});
+    std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.span());
+
+    try response.headers.put("Content-Type", "Keep-Alive");
+}

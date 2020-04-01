@@ -42,7 +42,7 @@ pub const ServerErrorHandler = struct {
                 &response.stream,
                 response.allocator,
                 try std.debug.getSelfDebugInfo(),
-                false);
+                .no_color);
         }
 
         // Dump request and end of page
@@ -95,7 +95,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
             //std.debug.warn("Full path {}\n", .{full_path});
 
-            const file = fs.File.openRead(full_path) catch |err| {
+            const file = fs.openFileAbsolute(full_path, .{.read=true}) catch |err| {
                 // TODO: Handle debug page
                 // std.debug.warn("Static fille error: {}\n", .{err});
                 return self.renderNotFound(response);
@@ -128,7 +128,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
         pub fn renderNotFound(self: *Self, response: *web.Response) !void {
             response.status = responses.NOT_FOUND;
-            try response.stream.write("<h1>Not Found</h1>");
+            _ = try response.stream.write("<h1>Not Found</h1>");
         }
 
     };

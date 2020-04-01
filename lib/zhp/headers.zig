@@ -140,7 +140,7 @@ pub const Headers = struct {
 
     // Get the index of the  key
     pub fn lookup(self: *Headers, key: []const u8) !usize {
-        var headers = self.items.toSlice();
+        var headers = self.items.span();
         for (headers) |header, i| {
             if (ascii.eqlIgnoreCase(header.key, key)) return i;
         }
@@ -204,8 +204,8 @@ pub const Headers = struct {
         self.items.len = 0;
     }
 
-    pub fn toSlice(self: *Headers) []Header {
-        return self.items.toSlice();
+    pub fn span(self: *Headers) []Header {
+        return self.items.span();
     }
 
 };

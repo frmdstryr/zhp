@@ -13,17 +13,16 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Buffer = std.Buffer;
 
-
 pub const IOStream = struct {
-    pub const WriteError = File.WriteError;
+    pub const Error = File.WriteError;
     pub const ReadError = File.ReadError;
     allocator: *Allocator,
     in_buffer: []u8 = undefined,
+    out_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
     _in_end_index: usize = 0,
     _in_count: usize = 0,
     _out_count: usize = 0,
-    out_buffer: []u8 = undefined,
     _out_index: usize = 0,
     closed: bool = false,
     unbuffered: bool = false,
@@ -35,7 +34,6 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-
     pub fn init(file: File) IOStream {
         return IOStream{
             .in_file = file,
@@ -142,6 +140,12 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // InStream
     // ------------------------------------------------------------------------
+    pub const InStream = std.io.InStream(*IOStream, File.ReadError, IOStream.readFn);
+
+    pub fn inStream(self: *Self) InStream {
+        return InStream{.context=self};
+    }
+
     // Return the amount of bytes waiting in the input buffer
     pub inline fn amountBuffered(self: *Self) usize {
         return self._in_end_index-self._in_start_index;
@@ -213,157 +217,19 @@ pub const IOStream = struct {
         }
     }
 
-    pub fn read(self: *Self, buffer: []u8) !usize {
-        if (comptime std.io.is_async) {
-            var f = async self.readFn(buffer);
-            return await f;
-        } else {
-            return self.readFn(buffer);
-        }
-    }
 
     pub fn fillBuffer(self: *Self) !void {
-        const n = try self.read(self.in_buffer);
+        const n = try self.readFn(self.in_buffer);
         if (n == 0) return error.EndOfStream;
         self._in_start_index = 0;
         self._in_end_index = n;
-    }
-
-    /// Returns the number of bytes read. If the number read is smaller than buf.len, it
-    /// means the stream reached the end. Reaching the end of a stream is not an error
-    /// condition.
-    pub fn readFull(self: *Self, buffer: []u8) !usize {
-        var index: usize = 0;
-        while (index != buffer.len) {
-            const amt = try self.read(buffer[index..]);
-            if (amt == 0) return index;
-            index += amt;
-        }
-        return index;
-    }
-
-    /// Returns the number of bytes read. If the number read would be smaller than buf.len,
-    /// error.EndOfStream is returned instead.
-    pub fn readNoEof(self: *Self, buf: []u8) !void {
-        const amt_read = try self.readFull(buf);
-        if (amt_read < buf.len) return error.EndOfStream;
-    }
-
-    /// Replaces `buffer` contents by reading from the stream until it is finished.
-    /// If `buffer.len()` would exceed `max_size`, `error.StreamTooLong` is returned and
-    /// the contents read from the stream are lost.
-    pub fn readAllBuffer(self: *Self, buffer: *Buffer, max_size: usize) !void {
-        try buffer.resize(0);
-
-        var actual_buf_len: usize = 0;
-        while (true) {
-            const dest_slice = buffer.toSlice()[actual_buf_len..];
-            const bytes_read = try self.readFull(dest_slice);
-            actual_buf_len += bytes_read;
-
-            if (bytes_read != dest_slice.len) {
-                buffer.shrink(actual_buf_len);
-                return;
-            }
-
-            const new_buf_size = math.min(max_size, actual_buf_len + mem.page_size);
-            if (new_buf_size == actual_buf_len) return error.StreamTooLong;
-            try buffer.resize(new_buf_size);
-        }
-    }
-
-    /// Allocates enough memory to hold all the contents of the stream. If the allocated
-    /// memory would be greater than `max_size`, returns `error.StreamTooLong`.
-    /// Caller owns returned memory.
-    /// If this function returns an error, the contents from the stream read so far are lost.
-    pub fn readAllAlloc(self: *Self, allocator: *mem.Allocator, max_size: usize) ![]u8 {
-        var buf = Buffer.initNull(allocator);
-        defer buf.deinit();
-
-        try self.readAllBuffer(&buf, max_size);
-        return buf.toOwnedSlice();
-    }
-
-    /// Replaces `buffer` contents by reading from the stream until `delimiter` is found.
-    /// Does not include the delimiter in the result.
-    /// If `buffer.len()` would exceed `max_size`, `error.StreamTooLong` is returned and the contents
-    /// read from the stream so far are lost.
-    pub fn readUntilDelimiterBuffer(self: *Self, buffer: *Buffer, delimiter: u8, max_size: usize) !void {
-        try buffer.resize(0);
-
-        while (true) {
-            var byte: u8 = try self.readByte();
-
-            if (byte == delimiter) {
-                return;
-            }
-
-            if (buffer.len() == max_size) {
-                return error.StreamTooLong;
-            }
-
-            try buffer.appendByte(byte);
-        }
-    }
-
-    /// Allocates enough memory to read until `delimiter`. If the allocated
-    /// memory would be greater than `max_size`, returns `error.StreamTooLong`.
-    /// Caller owns returned memory.
-    /// If this function returns an error, the contents from the stream read so far are lost.
-    pub fn readUntilDelimiterAlloc(self: *Self, allocator: *mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-        var buf = Buffer.initNull(allocator);
-        defer buf.deinit();
-
-        try self.readUntilDelimiterBuffer(&buf, delimiter, max_size);
-        return buf.toOwnedSlice();
-    }
-
-    /// Reads from the stream until specified byte is found. If the buffer is not
-    /// large enough to hold the entire contents, `error.StreamTooLong` is returned.
-    /// If end-of-stream is found, returns the rest of the stream. If this
-    /// function is called again after that, returns null.
-    /// Returns a slice of the stream data, with ptr equal to `buf.ptr`. The
-    /// delimiter byte is not included in the returned slice.
-    pub fn readUntilDelimiterOrEof(self: *Self, buf: []u8, delimiter: u8) !?[]u8 {
-        var index: usize = 0;
-        while (true) {
-            const byte = self.readByte() catch |err| switch (err) {
-                error.EndOfStream => {
-                    if (index == 0) {
-                        return null;
-                    } else {
-                        return buf[0..index];
-                    }
-                },
-                else => |e| return e,
-            };
-
-            if (byte == delimiter) return buf[0..index];
-            if (index >= buf.len) return error.StreamTooLong;
-
-            buf[index] = byte;
-            index += 1;
-        }
-    }
-
-    /// Reads from the stream until specified byte is found, discarding all data,
-    /// including the delimiter.
-    /// If end-of-stream is found, this function succeeds.
-    pub fn skipUntilDelimiterOrEof(self: *Self, delimiter: u8) !void {
-        while (true) {
-            const byte = self.readByte() catch |err| switch (err) {
-                error.EndOfStream => return,
-                else => |e| return e,
-            };
-            if (byte == delimiter) return;
-        }
     }
 
     /// Reads 1 byte from the stream or returns `error.EndOfStream`.
     pub fn readByte(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
             // Do a direct read into the input buffer
-            self._in_end_index = try self.read(
+            self._in_end_index = try self.readFn(
                 self.in_buffer[0..self.in_buffer.len]);
             self._in_start_index = 0;
             if (self._in_end_index < 1) return error.EndOfStream;
@@ -388,97 +254,23 @@ pub const IOStream = struct {
         return self.in_buffer[self._in_start_index];
     }
 
-    /// Same as `readByte` except the returned byte is signed.
-    pub fn readByteSigned(self: *Self) !i8 {
-        return @bitCast(i8, try self.readByte());
-    }
-
-    /// Reads a native-endian integer
-    pub fn readIntNative(self: *Self, comptime T: type) !T {
-        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
-        try self.readNoEof(bytes[0..]);
-        return mem.readIntNative(T, &bytes);
-    }
-
-    /// Reads a foreign-endian integer
-    pub fn readIntForeign(self: *Self, comptime T: type) !T {
-        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
-        try self.readNoEof(bytes[0..]);
-        return mem.readIntForeign(T, &bytes);
-    }
-
-    pub fn readIntLittle(self: *Self, comptime T: type) !T {
-        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
-        try self.readNoEof(bytes[0..]);
-        return mem.readIntLittle(T, &bytes);
-    }
-
-    pub fn readIntBig(self: *Self, comptime T: type) !T {
-        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
-        try self.readNoEof(bytes[0..]);
-        return mem.readIntBig(T, &bytes);
-    }
-
-    pub fn readInt(self: *Self, comptime T: type, endian: builtin.Endian) !T {
-        var bytes: [(T.bit_count + 7) / 8]u8 = undefined;
-        try self.readNoEof(bytes[0..]);
-        return mem.readInt(T, &bytes, endian);
-    }
-
-    pub fn readVarInt(self: *Self, comptime ReturnType: type, endian: builtin.Endian, size: usize) !ReturnType {
-        assert(size <= @sizeOf(ReturnType));
-        var bytes_buf: [@sizeOf(ReturnType)]u8 = undefined;
-        const bytes = bytes_buf[0..size];
-        try self.readNoEof(bytes);
-        return mem.readVarInt(ReturnType, bytes, endian);
-    }
-
-    pub fn skipBytes(self: *Self, num_bytes: u64) !void {
-        var i: u64 = 0;
-        while (i < num_bytes) : (i += 1) {
-            _ = try self.readByte();
-        }
-    }
-
-    pub fn readStruct(self: *Self, comptime T: type) !T {
-        // Only extern and packed structs have defined in-memory layout.
-        comptime assert(@typeInfo(T).Struct.layout != builtin.TypeInfo.ContainerLayout.Auto);
-        var res: [1]T = undefined;
-        try self.readNoEof(@sliceToBytes(res[0..]));
-        return res[0];
-    }
-
-    /// Reads an integer with the same size as the given enum's tag type. If the integer matches
-    /// an enum tag, casts the integer to the enum tag and returns it. Otherwise, returns an error.
-    /// TODO optimization taking advantage of most fields being in order
-    pub fn readEnum(self: *Self, comptime Enum: type, endian: builtin.Endian) !Enum {
-        const E = error{
-            /// An integer was read, but it did not match any of the tags in the supplied enum.
-            InvalidValue,
-        };
-        const type_info = @typeInfo(Enum).Enum;
-        const tag = try self.readInt(type_info.tag_type, endian);
-
-        inline for (std.meta.fields(Enum)) |field| {
-            if (tag == field.value) {
-                return @field(Enum, field.name);
-            }
-        }
-
-        return E.InvalidValue;
-    }
-
     // ------------------------------------------------------------------------
     // OutStream
     // ------------------------------------------------------------------------
-    fn writeFn(self: *Self, bytes: []const u8) !void {
+    pub const OutStream = std.io.OutStream(*IOStream, File.WriteError, IOStream.writeFn);
+
+    pub fn outStream(self: *Self) OutStream {
+        return OutStream{.context=self};
+    }
+
+    fn writeFn(self: *Self, bytes: []const u8) !usize {
         if (bytes.len == 1) {
             self.out_buffer[self._out_index] = bytes[0];
             self._out_index += 1;
             if (self._out_index == self.out_buffer.len) {
                 try self.flushFn();
             }
-            return;
+            return @as(usize, 1);
         } else if (bytes.len >= self.out_buffer.len) {
             try self.flushFn();
             return self.out_file.write(bytes);
@@ -496,20 +288,12 @@ pub const IOStream = struct {
             }
             src_index += copy_amt;
         }
+        return src_index;
     }
 
     fn flushFn(self: *Self) !void {
-        try self.out_file.write(self.out_buffer[0..self._out_index]);
+        _ = try self.out_file.write(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
-    }
-
-    pub fn write(self: *Self, bytes: []const u8) !void {
-        if (comptime std.io.is_async) {
-            var f = async self.writeFn(bytes);
-            return await f;
-        } else {
-            return self.writeFn(bytes);
-        }
     }
 
     pub fn flush(self: *Self) !void {
@@ -522,7 +306,7 @@ pub const IOStream = struct {
     }
 
     // Read directly into the output buffer then flush it out
-    pub fn writeFromInStream(self: *Self, in_stream: *std.io.InStream(ReadError)) !usize {
+    pub fn writeFromInStream(self: *Self, in_stream: var) !usize {
         var total_wrote: usize = 0;
         if (self._out_index != 0) {
             total_wrote += self._out_index;
@@ -538,15 +322,6 @@ pub const IOStream = struct {
         return total_wrote;
     }
 
-    pub fn writeByte(self: *Self, byte: u8) !void {
-        const slice = @as(*const [1]u8, &byte)[0..];
-        return self.writeFn(self, slice);
-    }
-
-    pub fn print(self: *Self, comptime format: []const u8, args: var) !void {
-        return std.fmt.format(self, WriteError, Self.writeFn, format, args);
-    }
-
     // ------------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------------
@@ -559,7 +334,7 @@ pub const IOStream = struct {
         }
     }
 
-    pub fn deinit(self: *IOStream) void {
+    pub fn deinit(self: *Self) void {
         if (!self.closed) self.close();
         self.allocator.free(self.in_buffer);
         self.allocator.free(self.out_buffer);
@@ -621,6 +396,33 @@ pub fn ObjectPool(comptime T: type) type {
         }
 
     };
+}
+
+
+test "object-pool" {
+    const Point = struct {
+        x: u8,
+        y: u8,
+    };
+    var pool = ObjectPool(Point).init(std.heap.page_allocator);
+    defer pool.deinit();
+
+    // Pool is empty
+    testing.expect(pool.get() == null);
+
+    // Create
+    var test_point = Point{.x=10, .y=3};
+    const pt = try pool.create();
+    pt.* = test_point;
+
+    // Pool is still empty
+    testing.expect(pool.get() == null);
+
+    // Relase
+    pool.release(pt);
+
+    // Should get the same thing back
+    testing.expectEqual(pool.get().?.*, test_point);
 }
 
 

@@ -14,7 +14,7 @@ const MainHandler = struct {
     pub fn get(self: *MainHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "text/plain");
-        try response.stream.write("Hello, World!");
+        try response.stream.writeAll("Hello, World!");
     }
 
 };
@@ -37,7 +37,7 @@ const StreamHandler = struct {
         r.random.bytes(buf[0..]);
         var i: usize = 1000;
         while (i >= 0) : (i -= 1) {
-            try response.stream.write(buf[0..]);
+            try response.stream.writeAll(buf[0..]);
         }
         std.debug.warn("Done!\n");
     }
@@ -51,7 +51,7 @@ const JsonHandler = struct {
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "application/json");
         // TODO: dump object to json?
-        try response.stream.write("{\"message\": \"Hello, World!\"}");
+        try response.stream.writeAll("{\"message\": \"Hello, World!\"}");
     }
 
 };
@@ -61,7 +61,7 @@ const ErrorTestHandler = struct {
 
     pub fn get(self: *ErrorTestHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.stream.write("Do some work");
+        try response.stream.writeAll("Do some work");
         return error.Ooops;
     }
 
@@ -74,7 +74,7 @@ const FormHandler = struct {
 
     pub fn get(self: *FormHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.stream.write(
+        try response.stream.writeAll(
             \\<form action="/form/" method="post" enctype="multipart/form-data">
             \\<input type="text" name="description" value="some text">
             \\<input type="file" name="myFile">
@@ -85,7 +85,7 @@ const FormHandler = struct {
 
     pub fn post(self: *FormHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.stream.write(
+        try response.stream.writeAll(
             \\<h1>Thanks!</h1>
         );
     }
@@ -94,7 +94,7 @@ const FormHandler = struct {
 
 pub fn main() anyerror!void {
 
-    const routes = [_]web.Route{
+    const routes = &[_]web.Route{
         web.Route.create("home", "/", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
