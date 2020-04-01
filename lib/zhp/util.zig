@@ -668,7 +668,7 @@ pub fn StringArrayMap(comptime T: type) type {
 
 test "string-array-map" {
     const Map = StringArrayMap([]const u8);
-    var map = Map.init(std.heap.direct_allocator);
+    var map = Map.init(std.heap.page_allocator);
     try map.append("query", "a");
     try map.append("query", "b");
     try map.append("query", "c");

@@ -212,7 +212,7 @@ pub const Headers = struct {
 
 
 test "headers-get" {
-    var allocator = std.heap.direct_allocator;
+    const allocator = std.heap.page_allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("cookie"), "Nom;nom;nom");
@@ -224,7 +224,7 @@ test "headers-get" {
 }
 
 test "headers-put" {
-    var allocator = std.heap.direct_allocator;
+    const allocator = std.heap.page_allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
@@ -234,7 +234,7 @@ test "headers-put" {
 }
 
 test "headers-remove" {
-    var allocator = std.heap.direct_allocator;
+    const allocator = std.heap.page_allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expect(headers.contains("Cookie"));
@@ -244,7 +244,7 @@ test "headers-remove" {
 }
 
 test "headers-pop" {
-    var allocator = std.heap.direct_allocator;
+    const allocator = std.heap.page_allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     testing.expectError(error.KeyError, headers.pop("Cookie"));
     try headers.put("Cookie", "Nom;nom;nom");
