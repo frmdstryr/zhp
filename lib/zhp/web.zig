@@ -61,6 +61,7 @@ pub const ServerRequest = struct {
 
     // This should be in init but doesn't work due to return results being copied
     pub fn prepare(self: *ServerRequest) void {
+        // TODO: Use custom ArenaAllocator with pre-allocated storage
         self.buffer = std.heap.FixedBufferAllocator.init(self.storage);
 
         // Setup the stream
@@ -326,7 +327,6 @@ pub const ServerConnection = struct {
         return;
     }
 
-
     // Write the request
     pub fn sendResponse(self: *ServerConnection, request: *Request,
                         response: *Response) !void {
@@ -384,7 +384,7 @@ pub const ServerConnection = struct {
             // Send the stream
             total_wrote = try self.io.writeFromInStream(in_stream);
         } else if (response.body.len > 0) {
-            _= try stream.write(response.body.span());
+            try stream.writeAll(response.body.span());
             total_wrote += response.body.len;
         }
 
@@ -657,9 +657,6 @@ pub const Router = struct {
 };
 
 
-
-
-
 pub const Application = struct {
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
     pub const RequestPool = util.ObjectPool(ServerRequest);
@@ -734,7 +731,6 @@ pub const Application = struct {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
         std.debug.warn("Listing on {}:{}\n", .{address, port});
-        //signals.setupSignalHandlers();
     }
 
     // Start serving requests For each incoming connection.
