@@ -292,7 +292,7 @@ pub const IOStream = struct {
     }
 
     fn flushFn(self: *Self) !void {
-        _ = try self.out_file.write(self.out_buffer[0..self._out_index]);
+        try self.out_file.writeAll(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
     }
 
@@ -316,6 +316,7 @@ pub const IOStream = struct {
         while (true) {
             self._out_index = try in_stream.read(self.out_buffer);
             if (self._out_index == 0) break;
+
             total_wrote += self._out_index;
             try self.flush();
         }

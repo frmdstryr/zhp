@@ -84,7 +84,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
             // Cannot be outside the root folder
             if (rel_path.len == 0 or rel_path[0] == '.') {
-                return self.renderNotFound(response);
+                return self.renderNotFound(request, response);
             }
 
             const full_path = try fs.path.join(allocator, &[_][]const u8{
@@ -94,7 +94,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             const file = fs.cwd().openFile(full_path, .{.read=true}) catch |err| {
                 // TODO: Handle debug page
                 // std.debug.warn("Static fille error: {}\n", .{err});
-                return self.renderNotFound(response);
+                return self.renderNotFound(request, response);
             };
 
             // Get file info
@@ -122,9 +122,9 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             response.source_stream = file.inStream();
         }
 
-        pub fn renderNotFound(self: *Self, response: *web.Response) !void {
-            response.status = responses.NOT_FOUND;
-            _ = try response.stream.write("<h1>Not Found</h1>");
+        pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {
+            var handler = NotFoundHandler{.handler=self.handler};
+            try handler.dispatch(request, response);
         }
 
     };
