@@ -82,8 +82,6 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             const rel_path = try fs.path.relative(
                 allocator, static_url, request.path);
 
-            //std.debug.warn("Rel path {}\n", .{rel_path});
-
             // Cannot be outside the root folder
             if (rel_path.len == 0 or rel_path[0] == '.') {
                 return self.renderNotFound(response);
@@ -93,9 +91,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
                 static_root, rel_path
             });
 
-            //std.debug.warn("Full path {}\n", .{full_path});
-
-            const file = fs.openFileAbsolute(full_path, .{.read=true}) catch |err| {
+            const file = fs.cwd().openFile(full_path, .{.read=true}) catch |err| {
                 // TODO: Handle debug page
                 // std.debug.warn("Static fille error: {}\n", .{err});
                 return self.renderNotFound(response);
