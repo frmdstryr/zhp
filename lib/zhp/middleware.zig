@@ -63,11 +63,13 @@ pub const LoggingMiddleware = struct {
 
     pub fn processResponse(middleware: *Middleware, request: *Request, response: *Response) !void {
         const self = @fieldParentPtr(LoggingMiddleware, "middleware", middleware);
-        std.debug.warn("[{}] {} {} {} ({})\n", .{
-            request.client,
+
+        // TODO: This is not async
+        std.debug.warn("{} {} {} ({}) {}\n", .{
+            response.status.code,
             @tagName(request.method),
             request.path,
-            response.status.code,
+            request.client,
             response.body.len});
     }
 };
