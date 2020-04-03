@@ -8,6 +8,7 @@ const builtin = @import("builtin");
 const ascii = std.ascii;
 const mem = std.mem;
 const time = std.time;
+const Address = std.net.Address;
 
 const assert = std.debug.assert;
 const testing = std.testing;
@@ -110,6 +111,9 @@ pub const Request = struct {
     // Body of request
     body: []const u8 = "",
 
+    // Client address
+    client: Address,
+
     // ------------------------------------------------------------------------
     // Internal fields
     // ------------------------------------------------------------------------
@@ -131,6 +135,7 @@ pub const Request = struct {
     pub fn init(allocator: *Allocator) !Request {
         return Request{
             .buffer = try Bytes.initCapacity(allocator, mem.page_size),
+            .client = try Address.parseIp("0.0.0.0", 80),
             .headers = try Headers.initCapacity(allocator, 64),
         };
     }
@@ -139,6 +144,7 @@ pub const Request = struct {
                         max_headers: usize) !Request {
         return Request{
             .buffer = try Bytes.initCapacity(allocator, buffer_size),
+            .client = try Address.parseIp("0.0.0.0", 80),
             .headers = try Headers.initCapacity(allocator, max_headers),
         };
     }
@@ -150,6 +156,7 @@ pub const Request = struct {
         //if (!builtin.is_test) @compileError("This is for testing only");
         return Request{
             .buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer),
+            .client = try Address.parseIp("0.0.0.0", 80),
             .headers = try Headers.initCapacity(allocator, 64),
         };
     }

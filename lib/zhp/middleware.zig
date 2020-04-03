@@ -5,36 +5,69 @@
 // -------------------------------------------------------------------------- //
 const std = @import("std");
 const web = @import("web.zig");
-
+const Request = web.Request;
+const Response = web.Response;
 
 
 pub const Middleware = struct {
-    stack_frame: []align(std.Target.stack_align) u8,
+    pub const STACK_SIZE = 100*1024;
 
     // Process the request and return the reponse
-    pub fn processRequest(self: *Middleware, request: *web.Request,
-                          response: *web.Response) !bool {
-        if (std.io.is_async) {
-            return await @asyncCall(self.stack_frame, {},
+    pub fn processRequest(self: *Middleware, request: *Request, response: *Response) !bool {
+        if (comptime std.io.is_async) {
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {},
                 self.processRequestFn, self, request, response);
         } else {
             return self.processRequestFn(self, request, response);
         }
     }
 
-    pub fn processResponse(self: *Middleware, request: *web.Request,
-                           response: *web.Response) !void {
-        if (std.io.is_async) {
-            return await @asyncCall(self.stack_frame, {},
+    pub fn processResponse(self: *Middleware, request: *Request, response: *Response) !void {
+        if (comptime std.io.is_async) {
+            var stack_frame: [STACK_SIZE ]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {},
                 self.processResponseFn, self, request, response);
         } else {
             try self.processResponseFn(self, request, response);
         }
     }
 
-    processRequestFn: fn(self: *Middleware,
-        request: *web.Request, response: *web.Response) anyerror!bool,
-    processResponseFn: fn(self: *Middleware,
-         request: *web.Request, response: *web.Response) anyerror!void,
+    const RequestFn = if (std.io.is_async)
+            async fn(self: *Middleware, request: *Request, response: *Response) anyerror!bool
+        else
+            fn(self: *Middleware, request: *Request, response: *Response) anyerror!bool;
+
+    processRequestFn: RequestFn,
+
+    const ResponseFn = if (std.io.is_async)
+            async fn(self: *Middleware, request: *Request, response: *Response) anyerror!void
+        else
+            fn(self: *Middleware, request: *Request, response: *Response) anyerror!void;
+
+    processResponseFn: ResponseFn,
 };
 
+
+pub const LoggingMiddleware = struct {
+
+    middleware: Middleware = Middleware{
+        .processRequestFn = LoggingMiddleware.processRequest,
+        .processResponseFn = LoggingMiddleware.processResponse,
+    },
+
+    pub fn processRequest(middleware: *Middleware, request: *Request, response: *Response) !bool {
+        const self = @fieldParentPtr(LoggingMiddleware, "middleware", middleware);
+        return false;
+    }
+
+    pub fn processResponse(middleware: *Middleware, request: *Request, response: *Response) !void {
+        const self = @fieldParentPtr(LoggingMiddleware, "middleware", middleware);
+        std.debug.warn("[{}] {} {} {} ({})\n", .{
+            request.client,
+            @tagName(request.method),
+            request.path,
+            response.status.code,
+            response.body.len});
+    }
+};

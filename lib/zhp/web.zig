@@ -165,6 +165,8 @@ pub const ServerConnection = struct {
         const request = &server_request.request;
         const response = &server_request.response;
 
+        request.client = conn.address;
+
         // Start serving requests
         while (true) {
             defer server_request.reset();

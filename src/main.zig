@@ -4,7 +4,8 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const web = @import("zhp").web;
+const zhp = @import("zhp");
+const web = zhp.web;
 
 pub const io_mode = .evented;
 
@@ -40,6 +41,18 @@ const StreamHandler = struct {
             try response.stream.writeAll(buf[0..]);
         }
         std.debug.warn("Done!\n");
+    }
+
+};
+
+
+const TemplateHandler = struct {
+    handler: web.RequestHandler,
+    const template = @embedFile("templates/cover.html");
+
+    pub fn get(self: *TemplateHandler, request: *web.Request,
+               response: *web.Response) !void {
+        try response.stream.writeAll(template);//, .{"Title"});
     }
 
 };
@@ -92,10 +105,11 @@ const FormHandler = struct {
 };
 
 
-pub fn main() anyerror!void {
+pub fn main() !void {
 
     const routes = &[_]web.Route{
-        web.Route.create("home", "/", MainHandler),
+        web.Route.create("cover", "/", TemplateHandler),
+        web.Route.create("hello", "/hello", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
@@ -107,6 +121,11 @@ pub fn main() anyerror!void {
         .routes=routes[0..],
         .debug=true,
     });
+
+    // Logger
+    var logger = zhp.middleware.LoggingMiddleware{};
+    try app.middleware.append(&logger.middleware);
+
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
     try app.start();
