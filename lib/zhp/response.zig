@@ -16,15 +16,15 @@ pub const Bytes = std.ArrayList(u8);
 
 
 pub const Response = struct {
+    pub const WriteError = error{OutOfMemory};
+    pub const OutStream = std.io.OutStream(*Response, WriteError, Response.writeFn);
+
     // Allocator for this response
     allocator: *Allocator = undefined,
     headers: Headers,
     status: Status = responses.OK,
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
-
-    pub const WriteError = error{OutOfMemory};
-    pub const OutStream = std.io.OutStream(*Response, WriteError, Response.writeFn);
 
     stream: OutStream = undefined,
 
@@ -52,7 +52,7 @@ pub const Response = struct {
 
     // Reset the request so it can be reused without reallocating memory
     pub fn reset(self: *Response) void {
-        self.body.len = 0;
+        self.body.items.len = 0;
         self.headers.reset();
         self.status = responses.OK;
         self.disconnect_on_finish = false;

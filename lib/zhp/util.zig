@@ -16,6 +16,7 @@ const Buffer = std.Buffer;
 pub const IOStream = struct {
     pub const Error = File.WriteError;
     pub const ReadError = File.ReadError;
+    const Self = @This();
     allocator: *Allocator,
     in_buffer: []u8 = undefined,
     out_buffer: []u8 = undefined,
@@ -26,8 +27,6 @@ pub const IOStream = struct {
     _out_index: usize = 0,
     closed: bool = false,
     unbuffered: bool = false,
-
-    const Self = @This();
     in_file: File,
     out_file: File,
 
@@ -370,7 +369,7 @@ pub fn ObjectPool(comptime T: type) type {
 
         // Get an object released back into the pool
         pub fn get(self: *Self) ?*T {
-            if (self.free_objects.len == 0) return null;
+            if (self.free_objects.items.len == 0) return null;
             return self.free_objects.swapRemove(0); // Pull the oldest
         }
 
@@ -378,7 +377,7 @@ pub fn ObjectPool(comptime T: type) type {
         pub fn create(self: *Self) !*T {
             const obj = try self.allocator.create(T);
             try self.objects.append(obj);
-            try self.free_objects.ensureCapacity(self.objects.len);
+            try self.free_objects.ensureCapacity(self.objects.items.len);
             return obj;
         }
 
@@ -476,7 +475,7 @@ test "string-array-map" {
     try map.append("query", "b");
     try map.append("query", "c");
     const query = map.get("query").?;
-    testing.expect(query.len == 3);
+    testing.expect(query.items.len == 3);
     testing.expect(mem.eql(u8, query.items[0], "a"));
 
     map.deinit();

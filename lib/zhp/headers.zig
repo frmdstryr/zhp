@@ -120,27 +120,27 @@ pub const Headers = struct {
         value: []const u8,
     };
     pub const HeaderList = std.ArrayList(Header);
-    items: HeaderList,
+    headers: HeaderList,
 
     pub fn initCapacity(allocator: *Allocator, num: usize) !Headers {
         return Headers{
-            .items = try HeaderList.initCapacity(allocator, num),
+            .headers = try HeaderList.initCapacity(allocator, num),
         };
     }
 
     pub fn deinit(self: *Headers) void {
-        self.items.deinit();
+        self.headers.deinit();
     }
 
     // Get the value for the given key
     pub fn get(self: *Headers, key: []const u8) ![]const u8 {
         const i = try self.lookup(key);
-        return self.items.at(i).value;
+        return self.headers.items[i].value;
     }
 
     // Get the index of the  key
     pub fn lookup(self: *Headers, key: []const u8) !usize {
-        var headers = self.items.span();
+        var headers = self.headers.span();
         for (headers) |header, i| {
             if (ascii.eqlIgnoreCase(header.key, key)) return i;
         }
@@ -172,27 +172,27 @@ pub const Headers = struct {
         // If the key already exists under a different name don't add it again
         const i = self.lookup(key) catch |err| switch (err) {
             error.KeyError => {
-                try self.items.append(Header{.key=key, .value=value});
+                try self.headers.append(Header{.key=key, .value=value});
                 return;
             },
             else => return err,
         };
-        self.items.set(i, Header{.key=key, .value=value});
+        self.headers.items[i] = Header{.key=key, .value=value};
     }
 
     // Put without checking for duplicates
     pub fn append(self: *Headers, key: []const u8, value: []const u8) !void {
-        return self.items.append(Header{.key=key, .value=value});
+        return self.headers.append(Header{.key=key, .value=value});
     }
 
     pub fn remove(self: *Headers, key: []const u8) !void {
         const i = try self.lookup(key); // Throw error
-        const v = self.items.swapRemove(i);
+        const v = self.headers.swapRemove(i);
     }
 
     pub fn pop(self: *Headers, key: []const u8) ![]const u8 {
         const i = try self.lookup(key); // Throw error
-        return self.items.swapRemove(i).value;
+        return self.headers.swapRemove(i).value;
     }
 
     pub fn popDefault(self: *Headers, key: []const u8, default: []const u8) []const u8 {
@@ -201,11 +201,11 @@ pub const Headers = struct {
 
     // Reset to an empty header list
     pub fn reset(self: *Headers) void {
-        self.items.len = 0;
+        self.headers.items.len = 0;
     }
 
     pub fn span(self: *Headers) []Header {
-        return self.items.span();
+        return self.headers.span();
     }
 
 };

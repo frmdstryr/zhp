@@ -206,12 +206,12 @@ fn trim(slice: []u8, values: []const u8) []u8 {
 
 
 pub const Registry = struct {
-    loaded: bool = false,
-    arena: std.heap.ArenaAllocator,
-
     const StringMap = std.StringHashMap([]const u8);
     const StringArray = std.ArrayList([]const u8);
     const StringArrayMap = std.StringHashMap(*StringArray);
+
+    loaded: bool = false,
+    arena: std.heap.ArenaAllocator,
 
     // Maps extension type to mime type
     type_map: StringMap,
@@ -253,7 +253,7 @@ pub const Registry = struct {
 
         if (self.type_map_inv.getValue(mime_type)) |extensions| {
             // Check if it's already there
-            for (extensions.toSlice()) |e| {
+            for (extensions.items) |e| {
                 if (mem.eql(u8, e, ext)) return; // Already there
             }
             try extensions.append(ext);

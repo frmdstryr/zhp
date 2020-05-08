@@ -404,7 +404,7 @@ pub const Request = struct {
         var value: ?[]u8 = null;
 
         // Strip any whitespace
-        while (headers.items.len < headers.items.capacity()) {
+        while (headers.headers.items.len < headers.headers.capacity) {
             // TODO: This assumes that the whole header in the buffer
             var ch = try stream.readByteFast();
 
@@ -496,7 +496,7 @@ pub const Request = struct {
         // Proxies sometimes cause Content-Length headers to get
         // duplicated.  If all the values are identical then we can
         // use them but if they differ it's an error.
-        var it = mem.separate(content_length_header, ",");
+        var it = mem.split(content_length_header, ",");
         if (it.next()) |piece| {
             try headers.put("Content-Length", piece);
         }
@@ -534,7 +534,7 @@ pub const Request = struct {
         self.content_length = 0;
         self.read_finished = false;
         self.headers.reset();
-        self.buffer.len = 0;
+        self.buffer.items.len = 0;
     }
 
     pub fn deinit(self: *Request) void {
@@ -667,7 +667,7 @@ test "03-bench-parse-request-line" {
         n = stream.readCount();
         request.reset();
         fba.reset();
-        request.buffer.len = stream.in_buffer.len;
+        request.buffer.items.len = stream.in_buffer.len;
     }
     const ns = timer.lap();
     const ms = ns / 1000000;
@@ -718,7 +718,7 @@ test "04-parse-request-headers" {
     _ = try request.parseNoSwap(&stream);
     var h = &request.headers;
 
-    testing.expectEqual(@as(usize, 6), h.items.len);
+    testing.expectEqual(@as(usize, 6), h.headers.items.len);
 
     testing.expectEqualSlices(u8, "server", try h.get("Host"));
     testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00",
@@ -739,7 +739,7 @@ test "04-parse-request-headers" {
     _ = try request.parseNoSwap(&stream);
     h = &request.headers;
 
-    testing.expectEqual(@as(usize, 9), h.items.len);
+    testing.expectEqual(@as(usize, 9), h.headers.items.len);
 
     testing.expectEqualSlices(u8, "www.kittyhell.com", try h.get("Host"));
     testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9",
@@ -779,7 +779,7 @@ test "05-bench-parse-request-headers" {
     while (i < requests) : (i += 1) {
         // HACK: For testing we "fake" filling the buffer...
         // since this test is only concerned with the parser speed
-        request.buffer.len = TEST_GET_1.len;
+        request.buffer.items.len = TEST_GET_1.len;
 
         //     1031k req/s 725MB/s (969 ns/req)
         n = try request.parseNoSwap(&stream);

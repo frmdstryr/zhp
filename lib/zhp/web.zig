@@ -364,7 +364,7 @@ pub const ServerConnection = struct {
 
         // Send content length if missing otherwise the client hangs reading
         if (!response.headers.contains("Content-Length")) {
-            try stream.print("Content-Length: {}\r\n", .{response.body.len});
+            try stream.print("Content-Length: {}\r\n", .{response.body.items.len});
         }
 
         // End of headers
@@ -385,9 +385,9 @@ pub const ServerConnection = struct {
             try self.io.flush();
             // Send the stream
             total_wrote = try self.io.writeFromInStream(in_stream);
-        } else if (response.body.len > 0) {
+        } else if (response.body.items.len > 0) {
             try stream.writeAll(response.body.span());
-            total_wrote += response.body.len;
+            total_wrote += response.body.items.len;
         }
 
         // Flush anything left
@@ -395,9 +395,9 @@ pub const ServerConnection = struct {
 
         // Make sure the content-length was correct otherwise the client
         // will hang waiting
-        if (total_wrote != response.body.len) {
+        if (total_wrote != response.body.items.len) {
             std.debug.warn("Invalid content-length: {} != {}\n",
-                .{total_wrote, response.body.len});
+                .{total_wrote, response.body.items.len});
             return error.InvalidContentLength;
         }
 
@@ -432,23 +432,39 @@ pub const ServerConnection = struct {
 
 
 pub const RequestHandler = struct {
+    const STACK_SIZE = 100*1024;
+
+    // Request handler signature
+    const request_handler = if (std.io.is_async)
+            fn(self: *RequestHandler) callconv(.Async) anyerror!void
+        else
+            fn(self: *RequestHandler) anyerror!void;
+
+
     application: *Application,
     request: *Request,
     response: *Response,
     err: ?anyerror = null,
 
-    // Request handler signature
-    const request_handler = if (std.io.is_async)
-            async fn(self: *RequestHandler) anyerror!void
-        else
-            fn(self: *RequestHandler) anyerror!void;
+    // Generic dispatch to handle
+    dispatch: request_handler = defaultDispatch,
+
+    // Default handlers
+    head: request_handler = defaultHandler,
+    get: request_handler = defaultHandler,
+    post: request_handler = defaultHandler,
+    delete: request_handler = defaultHandler,
+    patch: request_handler = defaultHandler,
+    put: request_handler = defaultHandler,
+    options: request_handler = defaultHandler,
+    destroy: fn(self: *RequestHandler) void,
 
     // Execute the request handler by running the dispatch function
     // By default the dispatch function calls the method matching
     // the request method
     pub fn execute(self: *RequestHandler) !void {
         if (std.io.is_async) {
-            var stack_frame: [100*1024]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {}, self.dispatch, self);
         } else {
             try self.dispatch(self);
@@ -470,7 +486,7 @@ pub const RequestHandler = struct {
         };
         if (std.io.is_async) {
             // Give a good chunk to the handler
-            var stack_frame: [98*1024]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {}, handler, self);
         } else {
             return handler(self);
@@ -483,23 +499,10 @@ pub const RequestHandler = struct {
         return error.HttpError;
     }
 
-    // Generic dispatch to handle
-    dispatch: request_handler = defaultDispatch,
-
-    // Default handlers
-    head: request_handler = defaultHandler,
-    get: request_handler = defaultHandler,
-    post: request_handler = defaultHandler,
-    delete: request_handler = defaultHandler,
-    patch: request_handler = defaultHandler,
-    put: request_handler = defaultHandler,
-    options: request_handler = defaultHandler,
-
     // Deinit
     pub fn deinit(self: *RequestHandler) void {
         self.destroy(self);
     }
-    destroy: fn(self: *RequestHandler) void,
 
 };
 
@@ -663,22 +666,8 @@ pub const Application = struct {
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
     pub const RequestPool = util.ObjectPool(ServerRequest);
 
-    allocator: *Allocator,
-    router: Router,
-    server: net.StreamServer,
-    connection_pool: ConnectionPool,
-    request_pool: RequestPool,
-    middleware: std.ArrayList(*Middleware),
-    mimetypes: mimetypes.Registry,
-
     // Global instance
     pub var instance: ?*Application = null;
-
-    // ------------------------------------------------------------------------
-    // Default handlers
-    // ------------------------------------------------------------------------
-    error_handler: Handler = createHandler(handlers.ServerErrorHandler),
-    not_found_handler: Handler = createHandler(handlers.NotFoundHandler),
 
     // ------------------------------------------------------------------------
     // Server setup
@@ -710,6 +699,20 @@ pub const Application = struct {
         // Debugging
         debug: bool = false,
     };
+
+    allocator: *Allocator,
+    router: Router,
+    server: net.StreamServer,
+    connection_pool: ConnectionPool,
+    request_pool: RequestPool,
+    middleware: std.ArrayList(*Middleware),
+    mimetypes: mimetypes.Registry,
+
+    // ------------------------------------------------------------------------
+    // Default handlers
+    // ------------------------------------------------------------------------
+    error_handler: Handler = createHandler(handlers.ServerErrorHandler),
+    not_found_handler: Handler = createHandler(handlers.NotFoundHandler),
     options: Options,
 
     // ------------------------------------------------------------------------

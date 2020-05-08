@@ -118,7 +118,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             }
 
             response.status = responses.OK;
-            response.body.len = stat.size; // This sets the content length
+            response.body.items.len = stat.size; // This sets the content length
             response.source_stream = file.inStream();
         }
 
