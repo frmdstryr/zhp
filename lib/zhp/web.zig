@@ -90,13 +90,12 @@ pub const ServerRequest = struct {
         self.response.reset();
     }
 
-
     // Release this request back into the pool
     pub fn release(self: *ServerRequest) void {
         //self.reset();
         const app = self.application;
         const lock = app.request_pool.lock.acquire();
-            app.request_pool.release(self);
+        app.request_pool.release(self);
         lock.release();
     }
 
@@ -141,14 +140,14 @@ pub const ServerConnection = struct {
         self.address = conn.address;
         const app = self.application;
         const params = &app.options;
-        const stream = &self.io.outStream();
+        const stream = &self.io.writer();
         self.io.reinit(conn.file);
         defer self.io.close();
         defer self.release();
 
         // Grab a request
         // at some point this should be moved into the loop to handle
-        // multiplexing but it currently makes it slower
+        // pipelining but it currently makes it slower
         const lock = app.request_pool.lock.acquire();
             var server_request: *ServerRequest = undefined;
             if (app.request_pool.get()) |c| {
@@ -299,7 +298,7 @@ pub const ServerConnection = struct {
 
     fn readFixedBody(self: *ServerConnection, request: *Request) !void {
         const params = &self.application.options;
-        const stream = &self.io.inStream();
+        const stream = &self.io.reader();
 
         // End of the request
         const end_of_request = request.head.len;
@@ -308,7 +307,7 @@ pub const ServerConnection = struct {
         try request.buffer.resize(request.content_length + end_of_request);
 
         // Anything else is the body
-        var body = request.buffer.span()[end_of_request..];
+        var body = request.buffer.items[end_of_request..];
 
         // Take whatever is still buffered
         const amt = self.io.consumeBuffered(request.content_length);
@@ -332,7 +331,7 @@ pub const ServerConnection = struct {
     // Write the request
     pub fn sendResponse(self: *ServerConnection, request: *Request,
                         response: *Response) !void {
-        const stream = &self.io.outStream();
+        const stream = &self.io.writer();
 
         // Finalize any headers
         if (request.version == .Http1_1 and response.disconnect_on_finish) {
@@ -353,7 +352,7 @@ pub const ServerConnection = struct {
         });
 
         // Write headers
-        for (response.headers.span()) |header| {
+        for (response.headers.headers.items) |header| {
             try stream.print("{}: {}\r\n", .{header.key, header.value});
         }
 
@@ -379,14 +378,14 @@ pub const ServerConnection = struct {
 //         }
         var total_wrote: usize = 0;
         if (response.source_stream != null)  {
-            const in_stream = &response.source_stream.?;
+            const source = &response.source_stream.?;
 
             // Empty the output buffer
             try self.io.flush();
             // Send the stream
-            total_wrote = try self.io.writeFromInStream(in_stream);
+            total_wrote = try self.io.writeFromReader(source);
         } else if (response.body.items.len > 0) {
-            try stream.writeAll(response.body.span());
+            try stream.writeAll(response.body.items);
             total_wrote += response.body.items.len;
         }
 
@@ -435,7 +434,7 @@ pub const RequestHandler = struct {
     const STACK_SIZE = 100*1024;
 
     // Request handler signature
-    const request_handler = if (std.io.is_async)
+    const HandlerFn = if (std.io.is_async)
             fn(self: *RequestHandler) callconv(.Async) anyerror!void
         else
             fn(self: *RequestHandler) anyerror!void;
@@ -447,16 +446,16 @@ pub const RequestHandler = struct {
     err: ?anyerror = null,
 
     // Generic dispatch to handle
-    dispatch: request_handler = defaultDispatch,
+    dispatch: HandlerFn = defaultDispatch,
 
     // Default handlers
-    head: request_handler = defaultHandler,
-    get: request_handler = defaultHandler,
-    post: request_handler = defaultHandler,
-    delete: request_handler = defaultHandler,
-    patch: request_handler = defaultHandler,
-    put: request_handler = defaultHandler,
-    options: request_handler = defaultHandler,
+    head: HandlerFn = defaultHandler,
+    get: HandlerFn = defaultHandler,
+    post: HandlerFn = defaultHandler,
+    delete: HandlerFn = defaultHandler,
+    patch: HandlerFn = defaultHandler,
+    put: HandlerFn = defaultHandler,
+    options: HandlerFn = defaultHandler,
     destroy: fn(self: *RequestHandler) void,
 
     // Execute the request handler by running the dispatch function
@@ -464,7 +463,7 @@ pub const RequestHandler = struct {
     // the request method
     pub fn execute(self: *RequestHandler) !void {
         if (std.io.is_async) {
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [STACK_SIZE * 2]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {}, self.dispatch, self);
         } else {
             try self.dispatch(self);
@@ -474,7 +473,7 @@ pub const RequestHandler = struct {
     // Dispatches to the other handlers based on the parsed request method
     // This can be replaced with a custom handler if necessary
     pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
-        const handler: request_handler = switch (self.request.method) {
+        const handler: HandlerFn = switch (self.request.method) {
             .Get => self.get,
             .Put => self.put,
             .Post => self.post,
@@ -629,12 +628,12 @@ pub const Route = struct {
 pub const Router = struct {
     routes: []Route,
 
-    pub fn sortLongestPath(lhs: Route, rhs: Route) bool {
+    pub fn sortLongestPath(context: void, lhs: Route, rhs: Route) bool {
         return lhs.path.len > rhs.path.len;
     }
 
     pub fn init(routes: []Route) Router {
-        std.sort.sort(Route, routes, sortLongestPath);
+        std.sort.sort(Route, routes, {}, sortLongestPath);
         return Router{
             .routes = routes,
         };
@@ -778,7 +777,7 @@ pub const Application = struct {
         // the request body has not yet been read at this point
         // if the middleware returns true the response is considered to be
         // handled and request processing stops here
-        for (self.middleware.span()) |middleware| {
+        for (self.middleware.items) |middleware| {
             var done = try middleware.processRequest(request, response);
             if (done) return null;
         }
@@ -803,7 +802,7 @@ pub const Application = struct {
             try Datetime.formatHttpFromTimestamp(
                 response.allocator, time.milliTimestamp()));
 
-        for (self.middleware.span()) |middleware| {
+        for (self.middleware.items) |middleware| {
             try middleware.processResponse(request, response);
         }
     }
@@ -815,7 +814,7 @@ pub const Application = struct {
         const lock = self.connection_pool.lock.acquire();
         defer lock.release();
         var n: usize = 0;
-        for (self.connection_pool.objects.span()) |server_conn| {
+        for (self.connection_pool.objects.items) |server_conn| {
             if (!server_conn.io.closed) continue;
             server_conn.io.close();
             n += 1;

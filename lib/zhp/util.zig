@@ -137,12 +137,12 @@ pub const IOStream = struct {
     }
 
     // ------------------------------------------------------------------------
-    // InStream
+    // Reader
     // ------------------------------------------------------------------------
-    pub const InStream = std.io.InStream(*IOStream, File.ReadError, IOStream.readFn);
+    pub const Reader = std.io.Reader(*IOStream, File.ReadError, IOStream.readFn);
 
-    pub fn inStream(self: *Self) InStream {
-        return InStream{.context=self};
+    pub fn reader(self: *Self) Reader {
+        return Reader{.context=self};
     }
 
     // Return the amount of bytes waiting in the input buffer
@@ -256,10 +256,10 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // OutStream
     // ------------------------------------------------------------------------
-    pub const OutStream = std.io.OutStream(*IOStream, File.WriteError, IOStream.writeFn);
+    pub const Writer = std.io.Writer(*IOStream, File.WriteError, IOStream.writeFn);
 
-    pub fn outStream(self: *Self) OutStream {
-        return OutStream{.context=self};
+    pub fn writer(self: *Self) Writer {
+        return Writer{.context=self};
     }
 
     fn writeFn(self: *Self, bytes: []const u8) !usize {
@@ -305,7 +305,7 @@ pub const IOStream = struct {
     }
 
     // Read directly into the output buffer then flush it out
-    pub fn writeFromInStream(self: *Self, in_stream: var) !usize {
+    pub fn writeFromReader(self: *Self, in_stream: var) !usize {
         var total_wrote: usize = 0;
         if (self._out_index != 0) {
             total_wrote += self._out_index;

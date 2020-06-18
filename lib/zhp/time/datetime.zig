@@ -43,11 +43,6 @@ pub const Month = enum {
 };
 
 
-// Conversions to millis
-pub const ms_per_day = time.s_per_day * time.ms_per_s;
-pub const ms_per_hour = time.s_per_hour * time.ms_per_s;
-pub const ms_per_min = time.s_per_min * time.ms_per_s;
-pub const ms_per_s = time.ms_per_s;
 
 pub const MIN_YEAR: u16 = 1;
 pub const MAX_YEAR: u16 = 9999;
@@ -257,36 +252,41 @@ pub const Date = struct {
 
     // Returns todays date
     pub fn now() Date {
-        return Datetime.now().date;
+        return Date.fromTimestamp(time.milliTimestamp());
     }
 
-    // Create a date from the number of seconds since 1 Jan 0001
+    // Create a date from the number of seconds since 1 Jan 1970
     pub fn fromSeconds(seconds: f64) Date {
-        return Datetime.fromSeconds(seconds).date;
-    }
-
-    // Return the number of seconds since 1 Jan 0001
-    pub fn toSeconds(self: Date) f64 {
-        const s: u64 = @intCast(u64, self.toOrdinal()-1) * time.s_per_day;
-        return @intToFloat(f64, s);
-    }
-
-    // Create a date from a UTC timestamp in milliseconds
-    pub fn fromTimestamp(timestamp: u64) Date {
-        const days = @divFloor(timestamp, ms_per_day) + EPOCH;
-        assert(days <= MAX_ORDINAL);
+        const r = math.modf(seconds);
+        const timestamp = @floatToInt(i64, r.ipart); // Seconds
+        const days = @divFloor(timestamp, time.s_per_day) + @as(i64, EPOCH);
+        assert(days >= 0 and days <= MAX_ORDINAL);
         return Date.fromOrdinal(@intCast(u32, days));
     }
 
-    // Create a UTC timestamp
-    pub fn toTimestamp(self: Date) u64 {
-        if (self.year < 1970) return 0;
-        const days = daysBeforeYear(self.year) - EPOCH + self.dayOfYear();
-        return @intCast(u64, days) * ms_per_day;
+    // Return the number of seconds since 1 Jan 1970
+    pub fn toSeconds(self: Date) f64 {
+        const days = @intCast(i64, self.toOrdinal()) - @as(i64, EPOCH);
+        return @intToFloat(f64, days * time.s_per_day);
+    }
+
+    // Create a date from a UTC timestamp in milliseconds relative to Jan 1st 1970
+    pub fn fromTimestamp(timestamp: i64) Date {
+        const days = @divFloor(timestamp, time.ms_per_day) + @as(i64, EPOCH);
+        assert(days >= 0 and days <= MAX_ORDINAL);
+        return Date.fromOrdinal(@intCast(u32, days));
+    }
+
+    // Create a UTC timestamp in milliseconds relative to Jan 1st 1970
+    pub fn toTimestamp(self: Date) i64 {
+        const d = @intCast(i64, daysBeforeYear(self.year));
+        const days = d - @as(i64, EPOCH) + @intCast(i64, self.dayOfYear());
+        return @intCast(i64, days) * time.ms_per_day;
     }
 
     // ------------------------------------------------------------------------
     // Comparisons
+    // ------------------------------------------------------------------------
     pub fn eql(self: Date, other: Date) bool {
         return self.cmp(other) == .eq;
     }
@@ -304,10 +304,12 @@ pub const Date = struct {
     pub fn gt(self: Date, other: Date) bool {
         return self.cmp(other) == .gt;
     }
+
     pub fn gte(self: Date, other: Date) bool {
         const r = self.cmp(other);
         return r == .eq or r == .gt;
     }
+
     pub fn lt(self: Date, other: Date) bool {
         return self.cmp(other) == .lt;
     }
@@ -470,26 +472,35 @@ test "date-from-ordinal" {
 }
 
 test "date-from-seconds" {
-    // Min check
-    var min_date = try Date.create(1, 1, 1);
-    var date = Date.fromSeconds(0);
-    testing.expect(date.eql(min_date));
-    testing.expectEqual(date.toSeconds(), 0);
+    var seconds: f64 = 0;
+    var date = Date.fromSeconds(seconds);
+    testing.expectEqual(date, try Date.create(1970, 1, 1));
+    testing.expectEqual(date.toSeconds(), seconds);
 
+    seconds = -@as(f64, EPOCH-1)*time.s_per_day;
+    date = Date.fromSeconds(seconds);
+    testing.expectEqual(date, try Date.create(1, 1, 1));
+    testing.expectEqual(date.toSeconds(), seconds);
 
-    const t = 63710928000.000;
-    date = Date.fromSeconds(t);
-    testing.expectEqual(date.year, 2019);
-    testing.expectEqual(date.month, 12);
-    testing.expectEqual(date.day, 3);
-    testing.expectEqual(date.toSeconds(), t);
-
-    // Max check
-    var max_date = try Date.create(9999, 12, 31);
-    const tmax: f64 = @intToFloat(f64, MAX_ORDINAL-1) * time.s_per_day;
-    date = Date.fromSeconds(tmax);
-    testing.expect(date.eql(max_date));
-    testing.expectEqual(date.toSeconds(), tmax);
+    seconds = @as(f64, MAX_ORDINAL-EPOCH)*time.s_per_day;
+    date = Date.fromSeconds(seconds);
+    testing.expectEqual(date, try Date.create(9999, 12, 31));
+    testing.expectEqual(date.toSeconds(), seconds);
+//
+//
+//     const t = 63710928000.000;
+//     date = Date.fromSeconds(t);
+//     testing.expectEqual(date.year, 2019);
+//     testing.expectEqual(date.month, 12);
+//     testing.expectEqual(date.day, 3);
+//     testing.expectEqual(date.toSeconds(), t);
+//
+//     Max check
+//     var max_date = try Date.create(9999, 12, 31);
+//     const tmax: f64 = @intToFloat(f64, MAX_ORDINAL-1) * time.s_per_day;
+//     date = Date.fromSeconds(tmax);
+//     testing.expect(date.eql(max_date));
+//     testing.expectEqual(date.toSeconds(), tmax);
 }
 
 
@@ -595,82 +606,108 @@ pub const Timezone = struct {
 };
 
 
+
+
 pub const Time = struct {
     hour: u8 = 0, // 0 to 23
     minute: u8 = 0, // 0 to 59
     second: u8 = 0, // 0 to 59
-    microsecond: u32 = 0, // 0 to 999999 TODO: Should this be u20?
+    nanosecond: u32 = 0, // 0 to 999999999 TODO: Should this be u20?
     zone: *const Timezone = &timezones.UTC,
-
-    validated: u1 = @compileError("A Time must be created using Time.create"),
 
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
     pub fn now() Time {
-        return Datetime.now().time;
+        return Time.fromTimestamp(time.milliTimestamp());
     }
 
     // Create a Time struct and validate that all fields are in range
-    pub fn create(hour: u32, minute: u32, second: u32, microsecond: u32,
+    pub fn create(hour: u32, minute: u32, second: u32, nanosecond: u32,
                   zone: ?*const Timezone) !Time {
-        if (hour > 23 or minute > 59 or second > 59 or microsecond > 999999) {
+        if (hour > 23 or minute > 59 or second > 59 or nanosecond > 999999999) {
             return error.InvalidTime;
         }
         return Time{
             .hour = @intCast(u8, hour),
             .minute = @intCast(u8, minute),
             .second = @intCast(u8, second),
-            .microsecond = microsecond,
+            .nanosecond = nanosecond,
             .zone = zone orelse &timezones.UTC,
-            .validated = 1,
         };
     }
 
     // Create a copy of the Time
     pub fn copy(self: Time) !Time {
         return Time.create(self.hour, self.minute, self.second,
-                           self.microsecond, self.zone);
+                           self.nanosecond, self.zone);
     }
 
-    // Create Time from a UTC Timestamp
-    pub fn fromTimestamp(timestamp: u64) Time {
-        var t = @intCast(u32, if (timestamp > ms_per_day)
-            @mod(timestamp, ms_per_day) else timestamp);
-        // t is now only the milliseconds part of the day
-        const h = @divFloor(t, ms_per_hour);
-        t -= h * ms_per_hour;
-        const m = @divFloor(t, ms_per_min);
-        t -= m * ms_per_min;
-        const s = @divFloor(t, ms_per_s);
-        const us = (t - s*ms_per_s) * 1000; // Convert to us
-        return Time.create(h, m, s, us, &timezones.UTC) catch unreachable;
+    // Create Time from a UTC Timestamp in milliseconds
+    pub fn fromTimestamp(timestamp: i64) Time {
+        const remainder = @mod(timestamp, time.ms_per_day);
+        var t = @intCast(u64, math.absInt(remainder) catch unreachable);
+        // t is now only the time part of the day
+        const h = @intCast(u32, @divFloor(t, time.ms_per_hour));
+        t -= h * time.ms_per_hour;
+        const m = @intCast(u32, @divFloor(t, time.ms_per_min));
+        t -= m * time.ms_per_min;
+        const s = @intCast(u32, @divFloor(t, time.ms_per_s));
+        t -= s * time.ms_per_s;
+        const ns = @intCast(u32, t * time.ns_per_ms);
+        return Time.create(h, m, s, ns, &timezones.UTC) catch unreachable;
+    }
+
+      // From seconds since the start of the day
+    pub fn fromSeconds(seconds: f64) Time {
+        assert(seconds >= 0);
+        // Convert to s and us
+        const r = math.modf(seconds);
+        var s = @floatToInt(u32, @mod(r.ipart, time.s_per_day)); // s
+        const h = @divFloor(s, time.s_per_hour);
+        s -= h * time.s_per_hour;
+        const m = @divFloor(s, time.s_per_min);
+        s -= m * time.s_per_min;
+
+        // Rounding seems to only be accurate to within 100ns
+        // for normal timestamps
+        var frac = math.round(r.fpart * time.ns_per_s/100)*100;
+        if (frac >= time.ns_per_s) {
+            s += 1;
+            frac -= time.ns_per_s;
+        } else if (frac < 0) {
+            s -= 1;
+            frac += time.ns_per_s;
+        }
+        const ns = @floatToInt(u32, frac);
+        return Time.create(h, m, s,  ns, &timezones.UTC) catch unreachable; // If this fails it's a bug
     }
 
     // Convert to a time in seconds relative to the UTC timezones
-    // excluding the microsecond component
-    pub fn totalSeconds(self: Time) i32 {
-        return @intCast(i32, self.hour) * time.s_per_hour +
-            (@intCast(i32, self.minute) - self.zone.offset) * time.s_per_min +
-            @intCast(i32, self.second);
-    }
-
-    // Convert to a time in seconds relative to the UTC timezones
-    // including the microsecond component
+    // including the nanosecond component
     pub fn toSeconds(self: Time) f64 {
-        const s: f64 = @intToFloat(f64, self.totalSeconds());
-        const us: f64 = @intToFloat(f32, self.microsecond) / time.us_per_s;
-        return s + us;
+        const s = @intToFloat(f64, self.totalSeconds());
+        const ns = @intToFloat(f64, self.nanosecond) / time.ns_per_s;
+        return s + ns;
     }
 
     // Convert to a timestamp in milliseconds from UTC
-    // excluding the microsecond fraction
-    pub fn toTimestamp(self: Time) i32 {
-        return @intCast(i32, self.hour) * ms_per_hour +
-               (@intCast(i32, self.minute)-self.zone.offset) * ms_per_min +
-               @intCast(i32, self.second) * ms_per_s +
-               @intCast(i32, @divFloor(self.microsecond, 1000));
+    pub fn toTimestamp(self: Time) i64 {
+        const h = @intCast(i64, self.hour) * time.ms_per_hour;
+        const m = (@intCast(i64, self.minute) - self.zone.offset) * time.ms_per_min;
+        const s = @intCast(i64, self.second) * time.ms_per_s;
+        const ms = @intCast(i64, self.nanosecond / time.ns_per_ms);
+        return h + m + s + ms;
     }
+
+    // Total seconds from the start of day
+    pub fn totalSeconds(self: Time) i32 {
+        const h = @intCast(i32, self.hour) * time.s_per_hour;
+        const m = (@intCast(i32, self.minute) - self.zone.offset) * time.s_per_min;
+        const s = @intCast(i32, self.second);
+        return h + m + s;
+    }
+
 
     // -----------------------------------------------------------------------
     // Comparisons
@@ -684,8 +721,8 @@ pub const Time = struct {
         var t2 = other.totalSeconds();
         if (t1 > t2) return .gt;
         if (t1 < t2) return .lt;
-        if (self.microsecond > other.microsecond) return .gt;
-        if (self.microsecond < other.microsecond) return .lt;
+        if (self.nanosecond > other.nanosecond) return .gt;
+        if (self.nanosecond < other.nanosecond) return .lt;
         return .eq;
     }
 
@@ -720,8 +757,51 @@ test "time-create" {
     testing.expect(t.hour == 2);
     testing.expect(t.minute == 36);
     testing.expect(t.second == 26);
-    testing.expect(t.microsecond == 928000);
-    t = Time.now();
+    testing.expect(t.nanosecond == 928000000);
+
+    testing.expectError(error.InvalidTime, Time.create(25, 1, 1, 0, null));
+    testing.expectError(error.InvalidTime, Time.create(1, 60, 1, 0, null));
+    testing.expectError(error.InvalidTime, Time.create(12, 30, 281, 0, null));
+    testing.expectError(error.InvalidTime, Time.create(12, 30, 28, 1000000000, null));
+}
+
+test "time-now" {
+    const t = Time.now();
+}
+
+test "time-from-seconds" {
+    var seconds: f64 = 15.12;
+    var t = Time.fromSeconds(seconds);
+    testing.expect(t.hour == 0);
+    testing.expect(t.minute == 0);
+    testing.expect(t.second == 15);
+    testing.expect(t.nanosecond == 120000000);
+    testing.expect(t.toSeconds() == seconds);
+
+    seconds = 315.12; // + 5 min
+    t = Time.fromSeconds(seconds);
+    testing.expect(t.hour == 0);
+    testing.expect(t.minute == 5);
+    testing.expect(t.second == 15);
+    testing.expect(t.nanosecond == 120000000);
+    testing.expect(t.toSeconds() == seconds);
+
+    seconds = 36000 + 315.12; // + 10 hr
+    t = Time.fromSeconds(seconds);
+    testing.expect(t.hour == 10);
+    testing.expect(t.minute == 5);
+    testing.expect(t.second == 15);
+    testing.expect(t.nanosecond == 120000000);
+    testing.expect(t.toSeconds() == seconds);
+
+    seconds = 108000 + 315.12; // + 30 hr
+    t = Time.fromSeconds(seconds);
+    testing.expect(t.hour == 6);
+    testing.expect(t.minute == 5);
+    testing.expect(t.second == 15);
+    testing.expect(t.nanosecond == 120000000);
+    testing.expectEqual(t.totalSeconds(), 6*3600+315);
+    //testing.expectAlmostEqual(t.toSeconds(), seconds-time.s_per_day);
 }
 
 test "time-copy" {
@@ -760,7 +840,7 @@ pub const Datetime = struct {
         years: i16 = 0,
         days: i32 = 0,
         seconds: i64 = 0,
-        microseconds: i32 = 0,
+        nanoseconds: i32 = 0,
         relative_to: ?Datetime = null,
 
         pub fn sub(self: *Delta, other: *Delta) Delta {
@@ -768,7 +848,7 @@ pub const Datetime = struct {
                 .years = self.years - other.years,
                 .days = self.days - other.days,
                 .seconds = self.seconds - other.seconds,
-                .microseconds = self.microseconds - other.microseconds,
+                .nanoseconds = self.nanoseconds - other.nanoseconds,
                 .relative_to = self.relative_to,
             };
         }
@@ -778,12 +858,12 @@ pub const Datetime = struct {
                 .years = self.years + other.years,
                 .days = self.days + other.days,
                 .seconds = self.seconds + other.seconds,
-                .microseconds = self.microseconds + other.microseconds,
+                .nanoseconds = self.nanoseconds + other.nanoseconds,
                 .relative_to = self.relative_to,
             };
         }
 
-        // Total seconds in the duration ignoring the microseconds fraction
+        // Total seconds in the duration ignoring the nanoseconds fraction
         pub fn totalSeconds(self: *Delta) i64 {
             // Calculate the total number of days we're shifting
             var days = self.days;
@@ -808,14 +888,14 @@ pub const Datetime = struct {
                 assert(self.years == 0);
             }
             var s = self.seconds;
-            var us = self.microseconds;
-            if (us > time.us_per_s) {
-                const ds = @divFloor(us, time.us_per_s);
-                us -= ds * time.us_per_s;
+            var ns = self.nanoseconds;
+            if (ns > time.ns_per_s) {
+                const ds = @divFloor(ns, time.ns_per_s);
+                ns -= ds * time.ns_per_s;
                 s += ds;
-            } else if (us < -time.us_per_s) {
-                const ds = @divFloor(us, -time.us_per_s);
-                us += ds * time.us_per_s;
+            } else if (ns < -time.ns_per_s) {
+                const ds = @divFloor(ns, -time.ns_per_s);
+                ns += ds * time.us_per_s;
                 s -= ds;
             }
             return (days * time.s_per_day + s);
@@ -826,14 +906,14 @@ pub const Datetime = struct {
     // Constructors
     // ------------------------------------------------------------------------
     pub fn now() Datetime {
-        return Datetime.fromTimestamp(std.time.milliTimestamp());
+        return Datetime.fromTimestamp(time.milliTimestamp());
     }
 
     pub fn create(year: u32, month: u32, day: u32, hour: u32, minute: u32,
-            second: u32, microsecond: u32, zone: ?*const Timezone) !Datetime {
+            second: u32, nanosecond: u32, zone: ?*const Timezone) !Datetime {
         return Datetime{
             .date = try Date.create(year, month, day),
-            .time = try Time.create(hour, minute, second, microsecond, zone),
+            .time = try Time.create(hour, minute, second, nanosecond, zone),
         };
     }
 
@@ -852,69 +932,36 @@ pub const Datetime = struct {
         };
     }
 
-    // From seconds since 1 Jan 0001
+    // From seconds since 1 Jan 1970
     pub fn fromSeconds(seconds: f64) Datetime {
-        assert(seconds >= 0);
-
-        // Convert to s and us
-        var r = math.modf(seconds);
-        var timestamp = @floatToInt(u64, r.ipart); // Seconds
-        var us = @floatToInt(u32, math.round(r.fpart * 1e6)); // Us
-        if (us >= time.us_per_s) {
-            timestamp -= 1;
-            us -= time.us_per_s;
-        } else if (us < 0) {
-            timestamp -= 1;
-            us += time.us_per_s;
-        }
-
-        const days = @divFloor(timestamp, time.s_per_day);
-        assert(days < MAX_ORDINAL);
-        // Add min ordinal of 1
-        var date = Date.fromOrdinal(@intCast(u32, days + 1));
-
-        // t is now seconds lef
-        timestamp -= days * time.s_per_day;
-        var t = @intCast(u32, timestamp);
-        const h = @divFloor(t, time.s_per_hour);
-        t -= h * time.s_per_hour;
-        const m = @divFloor(t, time.s_per_min);
-        t -= m * time.s_per_min;
-        const s = t;
         return Datetime{
-            .date = date,
-            .time = Time.create(h, m, s, us, &timezones.UTC)
-                catch unreachable, // If this fails it's a bug
+            .date = Date.fromSeconds(seconds),
+            .time = Time.fromSeconds(seconds),
         };
     }
 
-    // Seconds since 1 Jan 0001 including mircoseconds
+    // Seconds since 1 Jan 0001 including nanoseconds
     pub fn toSeconds(self: Datetime) f64 {
         return self.date.toSeconds() + self.time.toSeconds();
     }
 
-    // From POSIX timestamp in milliseoncds since 1 Jan 1970
-    pub fn fromTimestamp(timestamp: u64) Datetime {
-        const d = @divFloor(timestamp, ms_per_day);
-        const days = d + EPOCH;
-        assert(days <= MAX_ORDINAL);
-        var date = Date.fromOrdinal(@intCast(u32, days));
-        var t = Time.fromTimestamp(timestamp - d * ms_per_day);
-        return Datetime{.date = date, .time = t};
+    // From POSIX timestamp in milliseconds relative to 1 Jan 1970
+    pub fn fromTimestamp(timestamp: i64) Datetime {
+        const t = @divFloor(timestamp, time.ms_per_day);
+        const d = @intCast(u64, math.absInt(t) catch unreachable);
+        const days = if (timestamp >= 0) d + EPOCH else EPOCH - d;
+        assert(days >= 0 and days <= MAX_ORDINAL);
+        return Datetime{
+            .date = Date.fromOrdinal(@intCast(u32, days)),
+            .time = Time.fromTimestamp(timestamp - @intCast(i64, d) * time.ns_per_day),
+        };
     }
 
-    // To a UTC POSIX timestamp
-    pub fn toTimestamp(self: Datetime) u64 {
-        const ts = self.time.toTimestamp();
+    // To a UTC POSIX timestamp in milliseconds relative to 1 Jan 1970
+    pub fn toTimestamp(self: Datetime) i128 {
         const ds = self.date.toTimestamp();
-        if (ts >= 0) {
-            return ds + @intCast(u64, ts);
-        }
-        const t = @intCast(u64, -ts);
-        if (ds > t) {
-            return ds - t;
-        }
-        return 0; // Less than 1 Jan 1970
+        const ts = self.time.toTimestamp();
+        return ds + ts;
     }
 
     // -----------------------------------------------------------------------
@@ -956,16 +1003,14 @@ pub const Datetime = struct {
 
     // Return a Datetime.Delta relative to this date
     pub fn sub(self: Datetime, other: Datetime) Delta {
-        var days = @intCast(i32, self.date.toOrdinal())
-                   - @intCast(i32, other.date.toOrdinal());
+        var days = @intCast(i32, self.date.toOrdinal()) - @intCast(i32, other.date.toOrdinal());
         var seconds = self.time.totalSeconds() - other.time.totalSeconds();
         if (self.time.zone.offset != other.time.zone.offset) {
             const mins = (self.time.zone.offset - other.time.zone.offset);
             seconds += mins * time.s_per_min;
         }
-        const us = @intCast(i32, self.time.microsecond)
-                    - @intCast(i32, other.time.microsecond);
-        return Delta{.days=days, .seconds=seconds, .microseconds=us};
+        const ns = @intCast(i32, self.time.nanosecond) - @intCast(i32, other.time.nanosecond);
+        return Delta{.days=days, .seconds=seconds, .nanoseconds=ns};
     }
 
     // Create a Datetime shifted by the given number of years
@@ -1009,17 +1054,17 @@ pub const Datetime = struct {
         var days = delta.days;
         var s = delta.seconds + self.time.totalSeconds();
 
-        // Rollover us to s
-        var us = delta.microseconds + @intCast(i32, self.time.microsecond);
-        if (us > time.us_per_s) {
+        // Rollover ns to s
+        var ns = delta.nanoseconds + @intCast(i32, self.time.nanosecond);
+        if (ns > time.ns_per_s) {
             s += 1;
-            us -= time.us_per_s;
-        } else if (us < -time.us_per_s) {
+            ns -= time.ns_per_s;
+        } else if (ns < -time.ns_per_s) {
             s -= 1;
-            us += time.us_per_s;
+            ns += time.ns_per_s;
         }
-        assert(us >= 0 and us < time.us_per_s);
-        const microsecond = @intCast(u32, us);
+        assert(ns >= 0 and ns < time.ns_per_s);
+        const nanosecond = @intCast(u32, ns);
 
         // Rollover s to days
         if (s > time.s_per_day) {
@@ -1037,15 +1082,15 @@ pub const Datetime = struct {
         }
         assert(s >= 0 and s < time.s_per_day);
 
-        var seconds = @intCast(u32, s);
-        const hour = @divFloor(seconds, time.s_per_hour);
-        seconds -= hour * time.s_per_hour;
-        const minute = @divFloor(seconds, time.s_per_min);
-        seconds -= minute * time.s_per_min;
+        var second = @intCast(u32, s);
+        const hour = @divFloor(second, time.s_per_hour);
+        second -= hour * time.s_per_hour;
+        const minute = @divFloor(second, time.s_per_min);
+        second -= minute * time.s_per_min;
 
         return Datetime{
             .date=self.date.shift(Date.Delta{.years=delta.years, .days=days}),
-            .time=Time.create(hour, minute, seconds, microsecond, self.time.zone)
+            .time=Time.create(hour, minute, second, nanosecond, self.time.zone)
                 catch unreachable // This is a bug
         };
     }
@@ -1071,20 +1116,14 @@ pub const Datetime = struct {
 
     // Formats a timestamp in the format used by HTTP.
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
-    pub fn formatHttpFromTimestamp(allocator: *std.mem.Allocator, timestamp: u64) ![]const u8 {
+    pub fn formatHttpFromTimestamp(allocator: *std.mem.Allocator, timestamp: i64) ![]const u8 {
         return Datetime.fromTimestamp(timestamp).formatHttp(allocator);
     }
 
     // From time in nanoseconds
-    pub fn formatHttpFromModifiedDate(allocator: *std.mem.Allocator, mtime: i64) ![]const u8 {
-        comptime const ns_per_ms = time.ns_per_s/time.ms_per_s;
-        const ts = @divFloor(mtime, ns_per_ms);
-        if (ts < 0) {
-            var dt = Datetime.fromTimestamp(0);
-            return dt.shiftSeconds(ts).formatHttp(allocator);
-        } else {
-            return Datetime.formatHttpFromTimestamp(allocator, @intCast(u64, ts));
-        }
+    pub fn formatHttpFromModifiedDate(allocator: *std.mem.Allocator, mtime: i128) ![]const u8 {
+        const ts = @intCast(i64, @divFloor(mtime, time.ns_per_ms));
+        return Datetime.formatHttpFromTimestamp(allocator, ts);
     }
 
 };
@@ -1099,17 +1138,19 @@ test "datetime-create-timestamp" {
     const ts = 1574908586928;
     var t = Datetime.fromTimestamp(ts);
     testing.expect(t.date.eql(try Date.create(2019, 11, 28)));
-    testing.expect(t.time.eql(try Time.create(2, 36, 26, 928000, null)));
+    testing.expect(t.time.eql(try Time.create(2, 36, 26, 928000000, null)));
     testing.expectEqualSlices(u8, t.time.zone.name, "UTC");
     testing.expectEqual(t.toTimestamp(), ts);
 }
 
 test "datetime-from-seconds" {
-    const ts: f64 = 63710916533.835075;
+    // datetime.utcfromtimestamp(1592417521.9326444)
+    // datetime.datetime(2020, 6, 17, 18, 12, 1, 932644)
+    const ts: f64 = 1592417521.9326444;
     var t = Datetime.fromSeconds(ts);
-    testing.expect(t.date.year == 2019);
-    testing.expect(t.date.eql(try Date.create(2019, 12, 2)));
-    testing.expect(t.time.eql(try Time.create(20, 48, 53, 835075, null)));
+    testing.expect(t.date.year == 2020);
+    testing.expectEqual(t.date, try Date.create(2020, 6, 17));
+    testing.expectEqual(t.time, try Time.create(18, 12, 1, 932644400, null));
     testing.expectEqual(t.toSeconds(), ts);
 
 }
@@ -1124,7 +1165,7 @@ test "datetime-shift-timezones" {
     testing.expectEqual(t.time.hour, 21);
     testing.expectEqual(t.time.minute, 36);
     testing.expectEqual(t.time.second, 26);
-    testing.expectEqual(t.time.microsecond, 928000);
+    testing.expectEqual(t.time.nanosecond, 928000000);
     testing.expectEqualSlices(u8, t.time.zone.name, "America/New_York");
     testing.expectEqual(t.toTimestamp(), ts);
 
@@ -1191,6 +1232,15 @@ test "datetime-subtract" {
      b = try Datetime.create(2019, 12, 2, 11, 0, 0, 466545, null);
      delta = a.sub(b);
      testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
+}
+
+test "file-modified-date" {
+    const allocator = std.heap.page_allocator;
+    var f = try std.fs.cwd().openFile("./src/datetime.zig", .{});
+    var stat = try f.stat();
+    var str = try Datetime.formatHttpFromModifiedDate(allocator, stat.mtime);
+    defer allocator.free(str);
+    std.debug.warn("Modtime: {}\n", .{str});
 }
 
 test "readme-example" {

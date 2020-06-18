@@ -67,7 +67,8 @@ pub const Request = struct {
         Head,
         Delete,
         Options,
-        Unknown
+        Unknown,
+        Any,
     };
 
     pub const Version = enum {
@@ -171,7 +172,7 @@ pub const Request = struct {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
         try self.buffer.resize(mem.page_size);
-        stream.swapBuffer(self.buffer.span());
+        stream.swapBuffer(self.buffer.items);
 
         // TODO: This should retry if the error is EndOfBuffer which means
         // it got a partial request
@@ -188,8 +189,8 @@ pub const Request = struct {
         try self.parseContentLength(100*1024*1024);
 
         const end = stream.readCount();
-        self.head = self.buffer.span()[start..end];
-        return end-start;
+        self.head = self.buffer.items[start..end];
+        return self.head.len;
     }
 
     // Based on picohttpparser
@@ -306,7 +307,7 @@ pub const Request = struct {
     // Parse the url, this populates, the uri, host, scheme, and query
     // when available. The trailing space is consumed.
     pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
-        const buf = self.buffer.span();
+        const buf = self.buffer.items;
         const index = stream.readCount();
 
         var ch = try stream.readByteFast();
@@ -319,8 +320,8 @@ pub const Request = struct {
                     if (ch != expected) return error.BadRequest;
                 }
 
-                ch = ascii.toLower(try stream.readByteFast());
-                if (ch == 's') {
+                ch = try stream.readByteFast();
+                if (ch == 's' or ch == 'S') {
                     self.scheme = .Https;
                     ch = try stream.readByteFast();
                 } else {
@@ -369,7 +370,7 @@ pub const Request = struct {
     }
 
     pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
-        const buf = self.buffer.span();
+        const buf = self.buffer.items;
         const index = stream.readCount()-1;
         var query_start: ?usize = null;
         while (stream.readCount() < max_size) {
@@ -432,7 +433,7 @@ pub const Request = struct {
                     }
 
                     // Header name
-                    key = buf.span()[index..stream.readCount()-1];
+                    key = buf.items[index..stream.readCount()-1];
 
                     // Strip whitespace
                     while (stream.readCount() < max_size) {
@@ -450,8 +451,8 @@ pub const Request = struct {
             }
 
             // TODO: Strip trailing spaces and tabs
-            value = buf.span()[index..stream.readCount()-1];
-            //value = buf.span()[index..buf.len];
+            value = buf.items[index..stream.readCount()-1];
+            //value = buf.items[index..buf.len];
 
             // Ignore any remaining non-print characters
             while (stream.readCount() < max_size) {
@@ -462,10 +463,8 @@ pub const Request = struct {
             // Check CRLF
             if (ch == '\r') {
                 ch = try stream.readByteFast();
-                if (ch != '\n') return error.BadRequest;
-            } else if (ch != '\n') {
-                return error.BadRequest;
             }
+            if (ch != '\n') return error.BadRequest;
 
             //std.debug.warn("Found header: {}={}\n", .{key.?, value.?});
 

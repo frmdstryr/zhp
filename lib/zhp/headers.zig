@@ -140,7 +140,7 @@ pub const Headers = struct {
 
     // Get the index of the  key
     pub fn lookup(self: *Headers, key: []const u8) !usize {
-        var headers = self.headers.span();
+        var headers = self.headers.items;
         for (headers) |header, i| {
             if (ascii.eqlIgnoreCase(header.key, key)) return i;
         }
@@ -202,10 +202,6 @@ pub const Headers = struct {
     // Reset to an empty header list
     pub fn reset(self: *Headers) void {
         self.headers.items.len = 0;
-    }
-
-    pub fn span(self: *Headers) []Header {
-        return self.headers.span();
     }
 
 };

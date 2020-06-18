@@ -17,7 +17,7 @@ pub const Bytes = std.ArrayList(u8);
 
 pub const Response = struct {
     pub const WriteError = error{OutOfMemory};
-    pub const OutStream = std.io.OutStream(*Response, WriteError, Response.writeFn);
+    pub const Writer = std.io.Writer(*Response, WriteError, Response.writeFn);
 
     // Allocator for this response
     allocator: *Allocator = undefined,
@@ -26,13 +26,13 @@ pub const Response = struct {
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
 
-    stream: OutStream = undefined,
+    stream: Writer = undefined,
 
     // Buffer for output body, if the response is too big use source_stream
     body: Bytes,
 
     // If this is set, the response will read from the stream
-    source_stream: ?std.fs.File.InStream = null,
+    source_stream: ?std.fs.File.Reader = null,
 
     // Set to true if your request handler already sent everything
     finished: bool = false,
@@ -47,7 +47,7 @@ pub const Response = struct {
 
     // Must be called before writing
     pub fn prepare(self: *Response) void {
-        self.stream = OutStream{.context = self};
+        self.stream = Writer{.context = self};
     }
 
     // Reset the request so it can be reused without reallocating memory
@@ -84,11 +84,11 @@ test "response" {
     response.prepare();
     defer response.deinit();
     _ = try response.stream.write("Hello world!\n");
-    std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.span());
+    std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.items);
 
     _ = try response.stream.print("{}\n", .{"Testing!"});
-    std.debug.warn("'{}'\n", .{response.body.span()});
-    std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.span());
+    std.debug.warn("'{}'\n", .{response.body.items});
+    std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.items);
 
     try response.headers.put("Content-Type", "Keep-Alive");
 }
