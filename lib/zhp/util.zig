@@ -305,7 +305,7 @@ pub const IOStream = struct {
     }
 
     // Read directly into the output buffer then flush it out
-    pub fn writeFromReader(self: *Self, in_stream: var) !usize {
+    pub fn writeFromReader(self: *Self, in_stream: anytype) !usize {
         var total_wrote: usize = 0;
         if (self._out_index != 0) {
             total_wrote += self._out_index;
@@ -357,7 +357,7 @@ pub fn ObjectPool(comptime T: type) type {
         free_objects: ObjectList,
 
         // Lock to use if using threads
-        lock: std.Mutex = std.Mutex.init(),
+        lock: std.Mutex = std.Mutex{},
 
         pub fn init(allocator: *Allocator) Self {
             return Self{

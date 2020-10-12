@@ -36,9 +36,10 @@ pub const Middleware = @import("middleware.zig").Middleware;
 
 
 pub const ServerRequest = struct {
+    const STACK_SIZE = 1*1024;
     allocator: *Allocator,
     application: *Application,
-    stack_frame: []align(std.Target.stack_align) u8 = undefined,
+    //stack_frame: []align(std.Target.stack_align) u8 = undefined,
 
     // Storage the fixed buffer allocator used for each request handler
     storage: []u8 = undefined,
@@ -52,7 +53,7 @@ pub const ServerRequest = struct {
         return ServerRequest{
             .allocator = allocator,
             .application = application,
-            .stack_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, 1024),
+            //.stack_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, 1024),
             .storage = try allocator.alloc(u8, 1024*1024),
             .request = try Request.initCapacity(allocator, mem.page_size, 32),
             .response = try Response.initCapacity(allocator, mem.page_size, 10),
@@ -75,9 +76,9 @@ pub const ServerRequest = struct {
     fn buildHandler(self: *ServerRequest, factoryFn: Handler,
                     request: *Request, response: *Response) !*RequestHandler {
         if (std.io.is_async) {
-            //var stack_frame: [1*1024]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(self.stack_frame, {}, factoryFn,
-                self.application, request, response);
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, factoryFn,
+                .{self.application, request, response});
         } else {
             return factoryFn(self.application, response, response);
         }
@@ -464,7 +465,7 @@ pub const RequestHandler = struct {
     pub fn execute(self: *RequestHandler) !void {
         if (std.io.is_async) {
             var stack_frame: [STACK_SIZE * 2]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, self.dispatch, self);
+            return await @asyncCall(&stack_frame, {}, self.dispatch, .{self});
         } else {
             try self.dispatch(self);
         }
@@ -486,7 +487,7 @@ pub const RequestHandler = struct {
         if (std.io.is_async) {
             // Give a good chunk to the handler
             var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, handler, self);
+            return await @asyncCall(&stack_frame, {}, handler, .{self});
         } else {
             return handler(self);
         }
@@ -649,7 +650,7 @@ pub const Router = struct {
         return error.NotFound;
     }
 
-    pub fn reverseUrl(self: *Router, name: []const u8, args: var) ![]const u8 {
+    pub fn reverseUrl(self: *Router, name: []const u8, args: anytype) ![]const u8 {
         for (self.routes) |route| {
             if (mem.eql(u8, route.name, name)) {
                 return route.path;

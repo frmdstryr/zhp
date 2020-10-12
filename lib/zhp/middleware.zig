@@ -30,7 +30,7 @@ pub const Middleware = struct {
         if (comptime std.io.is_async) {
             var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {},
-                self.processRequestFn, self, request, response);
+                self.processRequestFn, .{self, request, response});
         } else {
             return self.processRequestFn(self, request, response);
         }
@@ -38,9 +38,9 @@ pub const Middleware = struct {
 
     pub fn processResponse(self: *Middleware, request: *Request, response: *Response) !void {
         if (comptime std.io.is_async) {
-            var stack_frame: [STACK_SIZE ]u8 align(std.Target.stack_align) = undefined;
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
             return await @asyncCall(&stack_frame, {},
-                self.processResponseFn, self, request, response);
+                self.processResponseFn, .{self, request, response});
         } else {
             try self.processResponseFn(self, request, response);
         }
