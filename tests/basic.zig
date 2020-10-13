@@ -9,10 +9,13 @@ const web = @import("zhp").web;
 
 pub const io_mode = .evented;
 
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = &gpa.allocator;
 
 pub fn main() anyerror!void {
-    const allocator = std.heap.direct_allocator;
     const req_listen_addr = try net.Address.parseIp4("127.0.0.1", 9000);
+    defer _ = gpa.deinit();
+
 
     var server = net.StreamServer.init(.{});
     defer server.deinit();
@@ -31,7 +34,6 @@ pub fn main() anyerror!void {
 
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
     //std.debug.warn("connected to {}\n", .{conn.address});
-    const allocator = std.heap.direct_allocator;
     var stream = try web.IOStream.initCapacity(allocator, conn.file, 0, 4096);
     defer stream.deinit();
     var request = try web.Request.init(allocator);
@@ -46,7 +48,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
             else => return err,
         };
 
-        try conn.file.write(
+        try conn.file.writeAll(
             "HTTP/1.1 200 OK\r\n" ++
             "Content-Length: 15\r\n" ++
             "Connection: keep-alive\r\n" ++
