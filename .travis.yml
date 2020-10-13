@@ -7,9 +7,6 @@ before_install:
     # Install zig
     - sudo snap install zig --classic --edge
 
-    # Make sure zig runs
-    - zig --help
-
     # Pull wrk
     - docker pull williamyeh/wrk
 
