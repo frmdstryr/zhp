@@ -4,7 +4,6 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const builtin = @import("builtin");
 const ascii = std.ascii;
 const mem = std.mem;
 const time = std.time;
@@ -14,48 +13,11 @@ const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Headers = @import("headers.zig").Headers;
-const IOStream = @import("util.zig").IOStream;
 
+const util = @import("util.zig");
+const Bytes = util.Bytes;
+const IOStream = util.IOStream;
 
-inline fn isCtrlChar(ch: u8) bool {
-    return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
-}
-
-
-test "is-control-char" {
-    testing.expect(isCtrlChar('A') == false);
-    testing.expect(isCtrlChar('\t') == false);
-    testing.expect(isCtrlChar('\r') == true);
-}
-
-const token_map = [_]u1{
-    //  0, 1, 2, 3, 4, 5, 6, 7 ,8, 9,10,11,12,13,14,15
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-
-    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-};
-
-inline fn isTokenChar(ch: u8) bool {
-    return token_map[ch] == 1;
-}
-
-pub const Bytes = std.ArrayList(u8);
 
 
 pub const Request = struct {
@@ -373,6 +335,7 @@ pub const Request = struct {
         const buf = self.buffer.items;
         const index = stream.readCount()-1;
         var query_start: ?usize = null;
+
         while (stream.readCount() < max_size) {
             const ch = try stream.readByteFast();
             if (!ascii.isGraph(ch)) {
@@ -396,84 +359,7 @@ pub const Request = struct {
     }
 
     pub inline fn parseHeaders(self: *Request, stream: *IOStream, max_size: usize) !void {
-        const headers = &self.headers;
-
-        // Reuse the request buffer for this
-        const buf = &self.buffer;
-        var index: usize = undefined;
-        var key: ?[]u8 = null;
-        var value: ?[]u8 = null;
-
-        // Strip any whitespace
-        while (headers.headers.items.len < headers.headers.capacity) {
-            // TODO: This assumes that the whole header in the buffer
-            var ch = try stream.readByteFast();
-
-            switch (ch) {
-                '\r' => {
-                    ch = try stream.readByteFast();
-                    if (ch != '\n') return error.BadRequest;
-                    break; // Empty line, we're done
-                },
-                '\n' => break, // Empty line, we're done
-                ' ', '\t' => {
-                    // Continuation of multi line header
-                    if (key == null) return error.BadRequest;
-                },
-                ':' => return error.BadRequest, // Empty key
-                else => {
-                    //index = buf.len;
-                    index = stream.readCount()-1;
-
-                    // Read Key
-                    while (stream.readCount() < max_size) {
-                        if (ch == ':') break;
-                        if (!isTokenChar(ch)) return error.BadRequest;
-                        ch = try stream.readByteFast();
-                    }
-
-                    // Header name
-                    key = buf.items[index..stream.readCount()-1];
-
-                    // Strip whitespace
-                    while (stream.readCount() < max_size) {
-                        ch = try stream.readByteFast();
-                        if (!(ch == ' ' or ch == '\t')) break;
-                    }
-                },
-            }
-
-            // Read value
-            index = stream.readCount()-1;
-            while (stream.readCount() < max_size) {
-                if (!ascii.isPrint(ch) and isCtrlChar(ch)) break;
-                ch = try stream.readByteFast();
-            }
-
-            // TODO: Strip trailing spaces and tabs
-            value = buf.items[index..stream.readCount()-1];
-            //value = buf.items[index..buf.len];
-
-            // Ignore any remaining non-print characters
-            while (stream.readCount() < max_size) {
-                if (!ascii.isPrint(ch) and isCtrlChar(ch)) break;
-                ch = try stream.readByteFast();
-            }
-
-            // Check CRLF
-            if (ch == '\r') {
-                ch = try stream.readByteFast();
-            }
-            if (ch != '\n') return error.BadRequest;
-
-            //std.debug.warn("Found header: {}={}\n", .{key.?, value.?});
-
-            // Next
-            try headers.append(key.?, value.?);
-        }
-        if (stream.readCount() == max_size) {
-            return error.RequestHeaderFieldsTooLarge;
-        }
+        try self.headers.parse(&self.buffer, stream, max_size);
     }
 
     pub inline fn parseContentLength(self: *Request, max_size: usize) !void {

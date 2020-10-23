@@ -65,6 +65,8 @@ pub const Response = struct {
     }
 
     // Write into the body buffer
+    // TODO: If the body reaches a certain limit it should be written
+    // into a file instead
     pub fn writeFn(self: *Response, bytes: []const u8) WriteError!usize {
         try self.body.appendSlice(bytes);
         return bytes.len;

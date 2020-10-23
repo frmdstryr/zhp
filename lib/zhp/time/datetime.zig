@@ -1235,8 +1235,8 @@ test "datetime-subtract" {
 }
 
 test "file-modified-date" {
-    const allocator = std.heap.page_allocator;
-    var f = try std.fs.cwd().openFile("./src/datetime.zig", .{});
+    const allocator = std.testing.allocator;
+    var f = try std.fs.cwd().openFile("lib/zhp/time/datetime.zig", .{});
     var stat = try f.stat();
     var str = try Datetime.formatHttpFromModifiedDate(allocator, stat.mtime);
     defer allocator.free(str);
@@ -1244,7 +1244,7 @@ test "file-modified-date" {
 }
 
 test "readme-example" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var date = try Date.create(2019, 12, 25);
     var next_year = date.shiftDays(7);
     assert(next_year.year == 2020);

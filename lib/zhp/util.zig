@@ -13,12 +13,55 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const Buffer = std.Buffer;
 
+pub const Bytes = std.ArrayList(u8);
+
+
+pub inline fn isCtrlChar(ch: u8) bool {
+    return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
+}
+
+
+test "is-control-char" {
+    testing.expect(isCtrlChar('A') == false);
+    testing.expect(isCtrlChar('\t') == false);
+    testing.expect(isCtrlChar('\r') == true);
+}
+
+const token_map = [_]u1{
+    //  0, 1, 2, 3, 4, 5, 6, 7 ,8, 9,10,11,12,13,14,15
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
+
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+pub inline fn isTokenChar(ch: u8) bool {
+    return token_map[ch] == 1;
+}
+
 pub const IOStream = struct {
+    pub const invalid_file = File{.handle=0};
     pub const Error = File.WriteError;
     pub const ReadError = File.ReadError;
     const Self = @This();
-    allocator: *Allocator,
-    in_buffer: []u8 = undefined,
+
+    allocator: ?*Allocator = null,
+    in_buffer: []const u8 = undefined,
     out_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
     _in_end_index: usize = 0,
@@ -37,7 +80,7 @@ pub const IOStream = struct {
         return IOStream{
             .in_file = file,
             .out_file = file,
-            .in_buffer = &[_]u8{},
+            .in_buffer = &[_]const u8{},
             .out_buffer = &[_]u8{},
         };
     }
@@ -55,6 +98,18 @@ pub const IOStream = struct {
         };
     }
 
+    // Used to read only from a fixed buffer
+    // the buffer must exist for the lifetime of the stream (or until swapped)
+    pub fn fromBuffer(buffer: *Bytes) IOStream {
+        return IOStream{
+            .in_file = invalid_file,
+            .out_file = invalid_file,
+            .in_buffer = buffer.items,
+            ._in_start_index = 0,
+            ._in_end_index = buffer.items.len,
+        };
+    }
+
     // ------------------------------------------------------------------------
     // Testing utilities
     // ------------------------------------------------------------------------
@@ -63,7 +118,7 @@ pub const IOStream = struct {
             .allocator = allocator,
             .in_file = try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
             .out_file = try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
-            .in_buffer = try mem.dupe(allocator, u8, in_buffer),
+            .in_buffer = in_buffer,
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
         };
@@ -71,7 +126,7 @@ pub const IOStream = struct {
 
     // Load into the in buffer for testing purposes
     pub fn load(self: *Self, allocator: *Allocator, in_buffer: []const u8) !void {
-        self.in_buffer = try mem.dupe(allocator, u8, in_buffer);
+        self.in_buffer = in_buffer;
         self._in_start_index = 0;
         self._in_end_index = in_buffer.len;
     }
@@ -115,7 +170,7 @@ pub const IOStream = struct {
 
     // Swap the current buffer with a new buffer copying any unread bytes
     // into the new buffer
-    pub fn swapBuffer(self: *Self, buffer: []u8) void {
+    pub fn swapBuffer(self: *Self, buffer: []const u8) void {
         //const left = self.amountBuffered();
 
         // Reset counter
@@ -336,8 +391,10 @@ pub const IOStream = struct {
 
     pub fn deinit(self: *Self) void {
         if (!self.closed) self.close();
-        self.allocator.free(self.in_buffer);
-        self.allocator.free(self.out_buffer);
+        if (self.allocator) |allocator| {
+            allocator.free(self.in_buffer);
+            allocator.free(self.out_buffer);
+        }
     }
 
 };
@@ -404,7 +461,7 @@ test "object-pool" {
         x: u8,
         y: u8,
     };
-    var pool = ObjectPool(Point).init(std.heap.page_allocator);
+    var pool = ObjectPool(Point).init(std.testing.allocator);
     defer pool.deinit();
 
     // Pool is empty
@@ -426,7 +483,7 @@ test "object-pool" {
 }
 
 
-// A map of arrays
+// An unmanaged map of arrays
 pub fn StringArrayMap(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -446,9 +503,11 @@ pub fn StringArrayMap(comptime T: type) type {
             // Deinit each array
             var it = self.storage.iterator();
             while (it.next()) |entry| {
-                entry.value.deinit();
+                const array = entry.value;
+                array.deinit();
+                self.allocator.destroy(array);
             }
-            self.storage.clear();
+            self.storage.deinit();
         }
 
         pub fn append(self: *Self, name: []const u8, arg: T) !void {
@@ -457,26 +516,39 @@ pub fn StringArrayMap(comptime T: type) type {
                 ptr.* = Array.init(self.allocator);
                 _ = try self.storage.put(name, ptr);
             }
-            var array = self.get(name).?;
+            var array = self.getArray(name).?;
             try array.append(arg);
         }
 
-        pub fn get(self: *Self, name: []const u8) ?*Array {
-            return self.storage.getValue(name);
+        // Return entire set
+        pub fn getArray(self: *Self, name: []const u8) ?*Array {
+            if (self.storage.getEntry(name)) |entry| {
+                return entry.value;
+            }
+            return null;
+        }
+
+        // Return first field
+        pub fn get(self: *Self, name: []const u8) ?[]const u8 {
+            if (self.getArray(name)) |array| {
+                return if (array.items.len > 0) array.items[0] else null;
+            }
+            return null;
         }
     };
 }
 
 
+
 test "string-array-map" {
     const Map = StringArrayMap([]const u8);
-    var map = Map.init(std.heap.page_allocator);
+    var map = Map.init(std.testing.allocator);
+    defer map.deinit();
     try map.append("query", "a");
     try map.append("query", "b");
     try map.append("query", "c");
-    const query = map.get("query").?;
+    const query = map.getArray("query").?;
     testing.expect(query.items.len == 3);
     testing.expect(mem.eql(u8, query.items[0], "a"));
 
-    map.deinit();
 }

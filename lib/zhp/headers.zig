@@ -11,6 +11,8 @@ const Buffer = std.Buffer;
 const Allocator = std.mem.Allocator;
 
 const util = @import("util.zig");
+const Bytes = util.Bytes;
+const IOStream = util.IOStream;
 
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers
 // pub const Header = enum {
@@ -204,12 +206,104 @@ pub const Headers = struct {
         self.headers.items.len = 0;
     }
 
+    // Assumes the streams current buffer will exist for the lifetime
+    // of the headers
+    pub fn parse(self: *Headers, buf: *Bytes, stream: *IOStream, max_size: usize) !void {
+        // Reuse the request buffer for this
+        var index: usize = undefined;
+        var key: ?[]u8 = null;
+        var value: ?[]u8 = null;
+
+        // Strip any whitespace
+        while (self.headers.items.len < self.headers.capacity) {
+            // TODO: This assumes that the whole header in the buffer
+            var ch = try stream.readByteFast();
+
+            switch (ch) {
+                '\r' => {
+                    ch = try stream.readByteFast();
+                    if (ch != '\n') return error.BadRequest;
+                    break; // Empty line, we're done
+                },
+                '\n' => break, // Empty line, we're done
+                ' ', '\t' => {
+                    // Continuation of multi line header
+                    if (key == null) return error.BadRequest;
+                },
+                ':' => return error.BadRequest, // Empty key
+                else => {
+                    //index = buf.len;
+                    index = stream.readCount()-1;
+
+                    // Read Key
+                    while (stream.readCount() < max_size) {
+                        if (ch == ':') break;
+                        if (!util.isTokenChar(ch)) return error.BadRequest;
+                        ch = try stream.readByteFast();
+                    }
+
+                    // Header name
+                    key = buf.items[index..stream.readCount()-1];
+
+                    // Strip whitespace
+                    while (stream.readCount() < max_size) {
+                        ch = try stream.readByteFast();
+                        if (!(ch == ' ' or ch == '\t')) break;
+                    }
+                },
+            }
+
+            // Read value
+            index = stream.readCount()-1;
+            while (stream.readCount() < max_size) {
+                if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
+                ch = try stream.readByteFast();
+            }
+
+            // TODO: Strip trailing spaces and tabs
+            value = buf.items[index..stream.readCount()-1];
+            //value = buf.items[index..buf.len];
+
+            // Ignore any remaining non-print characters
+            while (stream.readCount() < max_size) {
+                if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
+                ch = try stream.readByteFast();
+            }
+
+            // Check CRLF
+            if (ch == '\r') {
+                ch = try stream.readByteFast();
+            }
+            if (ch != '\n') return error.BadRequest;
+
+            //std.debug.warn("Found header: {}={}\n", .{key.?, value.?});
+
+            // Next
+            try self.append(key.?, value.?);
+        }
+        if (stream.readCount() == max_size) {
+            return error.RequestHeaderFieldsTooLarge;
+        }
+
+    }
+
+    // TODO: How can I make this
+    pub fn parseBuffer(self: *Headers, data: []const u8) !void {
+        var empty = &[_]u8{};
+        var fba = std.heap.FixedBufferAllocator.init(empty);
+        var buf = Bytes.fromOwnedSlice(&fba.allocator, data);
+        defer buf.deinit(); // Noop
+        var stream = IOStream.fromBuffer(&buf);
+        try self.parse(&buf, &stream, data.len);
+    }
+
 };
 
 
 test "headers-get" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
+    defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("cookie"), "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("cOOKie"), "Nom;nom;nom");
@@ -220,8 +314,9 @@ test "headers-get" {
 }
 
 test "headers-put" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
+    defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
     try headers.put("COOKie", "ABC"); // Squash even if different
@@ -230,8 +325,9 @@ test "headers-put" {
 }
 
 test "headers-remove" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
+    defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expect(headers.contains("Cookie"));
     testing.expect(headers.contains("COOKIE"));
@@ -240,8 +336,9 @@ test "headers-remove" {
 }
 
 test "headers-pop" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
+    defer headers.deinit();
     testing.expectError(error.KeyError, headers.pop("Cookie"));
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expect(mem.eql(u8, try headers.pop("Cookie"), "Nom;nom;nom"));
@@ -249,3 +346,24 @@ test "headers-pop" {
     testing.expect(mem.eql(u8, headers.popDefault("Cookie", "Hello"), "Hello"));
 }
 
+
+test "headers-parse" {
+    const HEADERS =
+        \\Host: bs.serving-sys.com
+        \\User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:15.0) Gecko/20100101 Firefox/15.0.1
+        \\Accept: image/png,image/*;q=0.8,*/*;q=0.5
+        \\Accept-Language: en-us,en;q=0.5
+        \\Accept-Encoding: gzip, deflate
+        \\Connection: keep-alive
+        \\Referer: http://static.adzerk.net/reddit/ads.html?sr=-reddit.com&bust2
+        \\
+        \\
+    ;
+    const allocator = std.testing.allocator;
+    var headers = try Headers.initCapacity(allocator, 64);
+    defer headers.deinit();
+    try headers.parseBuffer(HEADERS[0..]);
+
+    testing.expect(mem.eql(u8, try headers.get("Host"), "bs.serving-sys.com"));
+    testing.expect(mem.eql(u8, try headers.get("Connection"), "keep-alive"));
+}

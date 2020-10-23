@@ -12,14 +12,14 @@ before_install:
 
 script:
     # Test individual files
-    - zig test --release-fast lib/zhp/status.zig
-    - zig test --release-fast lib/zhp/headers.zig
-    - zig test --release-fast lib/zhp/middleware.zig
-    - zig test --release-fast lib/zhp/mimetypes.zig
-    - zig test --release-fast lib/zhp/time/datetime.zig
-    - zig test --release-fast lib/zhp/util.zig
-    - zig test --release-fast lib/zhp/request.zig
-    - zig test --release-fast lib/zhp/response.zig
+    - zig test -OReleaseSafe lib/zhp/status.zig
+    - zig test -OReleaseSafe lib/zhp/headers.zig
+    - zig test -OReleaseSafe lib/zhp/middleware.zig
+    - zig test -OReleaseSafe lib/zhp/mimetypes.zig
+    - zig test -OReleaseSafe lib/zhp/time/datetime.zig
+    - zig test -OReleaseSafe lib/zhp/util.zig
+    - zig test -OReleaseSafe lib/zhp/request.zig
+    - zig test -OReleaseSafe lib/zhp/response.zig
 
 
     # Make sure this repo builds

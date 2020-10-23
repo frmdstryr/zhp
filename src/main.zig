@@ -52,7 +52,8 @@ const TemplateHandler = struct {
 
     pub fn get(self: *TemplateHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.stream.writeAll(template);//, .{"Title"});
+        @setEvalBranchQuota(100000);
+        try response.stream.print(template, .{"Custom title"});
     }
 
 };
@@ -63,8 +64,14 @@ const JsonHandler = struct {
     pub fn get(self: *JsonHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "application/json");
-        // TODO: dump object to json?
-        try response.stream.writeAll("{\"message\": \"Hello, World!\"}");
+
+        var jw = std.json.writeStream(response.stream, 4);
+        try jw.beginObject();
+        for (request.headers.headers.items) |h| {
+            try jw.objectField(h.key);
+            try jw.emitString(h.value);
+        }
+        try jw.endObject();
     }
 
 };
@@ -88,8 +95,7 @@ const FormHandler = struct {
                response: *web.Response) !void {
         try response.stream.writeAll(
             \\<form action="/form/" method="post" enctype="multipart/form-data">
-            \\<input type="text" name="description" value="some text">
-            \\<input type="file" name="myFile">
+            \\<input type="text" name="name" value="Your name">
             \\<button type="submit">Submit</button>
             \\</form>
         );
@@ -97,14 +103,33 @@ const FormHandler = struct {
 
     pub fn post(self: *FormHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.stream.writeAll(
-            \\<h1>Thanks!</h1>
-        );
+        var content_type = request.headers.get("Content-Type") catch |err| switch (err) {
+            error.KeyError => "",
+            else => return err,
+        };
+        if (std.mem.startsWith(u8, content_type, "multipart/form-data")) {
+            var form = web.forms.Form.init(response.allocator);
+            //try form.parse(request);
+            try response.stream.print(
+                \\<h1>Hello: {}</h1>
+                , .{form.fields.get("name") orelse ""}
+            );
+            try response.stream.print(
+                \\<h1>Request: {}</h1>
+                , .{request.body});
+        } else {
+            response.status = web.responses.BAD_REQUEST;
+            try response.stream.writeAll("<h1>BAD REQUEST</h1>");
+            return;
+        }
     }
 };
 
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit());
+    const allocator = &gpa.allocator;
 
     const routes = &[_]web.Route{
         web.Route.create("cover", "/", TemplateHandler),
@@ -117,13 +142,14 @@ pub fn main() !void {
     };
 
     var app = web.Application.init(.{
+        .allocator=allocator,
         .routes=routes[0..],
         .debug=true,
     });
 
     // Logger
     var logger = zhp.middleware.LoggingMiddleware{};
-    try app.middleware.append(&logger.middleware);
+    //try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);

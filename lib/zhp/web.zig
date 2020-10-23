@@ -19,11 +19,11 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 
-const responses = @import("status.zig");
+pub const responses = @import("status.zig");
 const handlers = @import("handlers.zig");
 const Datetime = @import("time/datetime.zig").Datetime;
 const mimetypes = @import("mimetypes.zig");
-
+pub const forms = @import("forms.zig");
 
 pub const util = @import("util.zig");
 pub const IOStream = util.IOStream;
@@ -675,7 +675,7 @@ pub const Application = struct {
     pub const Options = struct {
         // Routes
         routes: []Route,
-        allocator: *Allocator = std.heap.page_allocator,
+        allocator: *Allocator,
         xheaders: bool = false,
         no_keep_alive: bool = false,
         protocol: []const u8 = "HTTP/1.1",
