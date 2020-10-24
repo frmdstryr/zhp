@@ -4,21 +4,17 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<title>{}</title>
-		<link rel="icon" href="img/favicon.ico">
+		<link rel="icon" href="/static/img/favicon.ico">
 		<!-- CSS FILES -->
-		<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/uikit@latest/dist/css/uikit.min.css">
+		<link rel="stylesheet" type="text/css" href="/static/css/uikit.min.css">
 		<style>
 
 		</style>
 	</head>
 	<body>
     <div class="uk-light wrap uk-background-norepeat uk-background-cover uk-background-center-center uk-cover-container uk-background-secondary">
-      <img data-srcset="https://picsum.photos/640/700/?image=482 640w,
-                   https://picsum.photos/960/700/?image=482 960w,
-                   https://picsum.photos/1200/900/?image=482 1200w,
-                   https://picsum.photos/2000/1000/?image=482 2000w"
-           sizes="100vw"
-           data-src="https://picsum.photos/1200/900/?image=482" alt="" data-uk-cover data-uk-img
+      <img
+           data-src="/static/img/engine-2682239-1920.jpg" alt="" data-uk-cover data-uk-img
       >
       <div class="uk-flex uk-flex-center uk-flex-middle uk-height-viewport uk-position-z-index uk-position-relative" data-uk-height-viewport="min-height: 400" style="background-color: rgba(0, 0, 0, 0.5);">
 
@@ -28,15 +24,15 @@
             <nav class="uk-navbar-container uk-navbar-transparent" data-uk-navbar>
               <div class="uk-navbar-left">
                 <div class="uk-navbar-item">
-                  <a class="uk-logo" href=""><img src="img/cover-logo.svg" alt="Logo"></a>
+                  <a class="uk-logo" href=""><img src="/static/img/cover-logo.svg" alt="ZHP"></a>
                 </div>
               </div>
               <div class="uk-navbar-right">
                 <ul class="uk-navbar-nav">
-                  <li class="uk-active uk-visible@m"><a href="" data-uk-icon="home"></a></li>
-                  <li class="uk-visible@s"><a href="">Features</a></li>
-                  <li class="uk-visible@s"><a href="">Security</a></li>
-                  <li class="uk-visible@s"><a href="">Testimonials</a></li>
+                  <li class="uk-active uk-visible@m"><a href="/" data-uk-icon="home"></a></li>
+                  <li class="uk-visible@s"><a href="/form/">Form</a></li>
+                  <li class="uk-visible@s"><a href="/500/">Error</a></li>
+                  <li class="uk-visible@s"><a href="/json/">JSON</a></li>
                   <li><a class="uk-navbar-toggle" data-uk-toggle data-uk-navbar-toggle-icon href="#offcanvas-nav"></a></li>
                 </ul>
               </div>
@@ -46,19 +42,30 @@
         <!-- /NAV -->
         <!-- TEXT -->
         <div class="uk-container uk-container-small uk-flex-auto uk-text-center" data-uk-scrollspy="target: > .animate; cls: uk-animation-slide-bottom-small uk-invisible; delay: 300">
-          <h1 class="uk-heading-primary animate uk-invisible" style="font-weight: 700;">Sleek, Fast and Reliable.</h1>
+          <h1 class="uk-heading-primary animate uk-invisible" style="font-weight: 700;">ZHP</h1>
           <div class="uk-width-4-5@m uk-margin-auto animate uk-invisible">
-            <p class="lead">Lorem ipsum dolor sit amet, consectetur adipisicing elit. A ad, reiciendis maxime, facilis nam natus incidunt provident.</p>
+            <p class="lead">
+                A HTTP/1.1 server in Zig, build for high performance.
+            </p>
           </div>
           <div class="uk-margin-medium-top animate uk-invisible" data-uk-margin data-uk-scrollspy-class="uk-animation-fade uk-invisible">
-            <a class="uk-button uk-button-default uk-button-large uk-width-2-3 uk-width-auto@s" data-uk-icon="arrow-right" title="Learn More">LEARN MORE</a>
-            <a class="uk-button uk-button-primary uk-button-large uk-width-2-3 uk-width-auto@s" data-uk-icon="check" title="Learn More">TRY IT OUT</a>
+            <a class="uk-button uk-button-primary uk-button-large uk-width-2-3 uk-width-auto@s" data-uk-icon="check" title="Learn More" href="https://github.com/frmdstryr/zhp">TRY IT OUT</a>
           </div>
         </div>
         <!-- /TEXT -->
         <!-- FOOT -->
         <div class="uk-position-bottom-center uk-position-small">
-          <span class="uk-text-small uk-text-center">© 2019 | <a href="https://github.com/zzseba78/Kick-Off" title="Created by KickOff">Created by KickOff</a> | Built with <a href="http://getuikit.com" title="Visit UIkit 3 site" target="_blank" data-uk-tooltip><span data-uk-icon="uikit"></span></a></span>
+          <span class="uk-text-small uk-text-center">
+            <p class="uk-text-muted">
+                Note: This site is served using ZHP behind an nginx reverse proxy.
+                Please do not benchmark this site or the server will ban your IP for a day (you can try but have been warned).
+            </p>
+          </span>
+          <span class="uk-text-small uk-text-center">
+            © 2020 | Created by <a href="https://codelv.com" title="Created by CodeLV">CodeLV</a>
+            | Built with <a href="http://getuikit.com" title="Visit UIkit 3 site" target="_blank" data-uk-tooltip><span data-uk-icon="uikit"></span></a>
+            | Photo by <a href="https://pixabay.com/users/coltsfan-5936078/">coltsfan</a>
+          </span>
         </div>
         <!-- /FOOT -->
       </div>
@@ -89,7 +96,7 @@
 		<!-- /OFFCANVAS -->
 
 		<!-- JS FILES -->
-		<script src="https://cdn.jsdelivr.net/npm/uikit@latest/dist/js/uikit.min.js"></script>
-		<script src="https://cdn.jsdelivr.net/npm/uikit@latest/dist/js/uikit-icons.min.js"></script>
+		<script src="/static/js/uikit.min.js"></script>
+		<script src="/static/js/uikit-icons.min.js"></script>
 	</body>
 </html>

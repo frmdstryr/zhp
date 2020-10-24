@@ -6,6 +6,7 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
+const log = std.log;
 const web = @import("web.zig");
 const responses = @import("status.zig");
 const Datetime = @import("time/datetime.zig").Datetime;
@@ -93,7 +94,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
             const file = fs.cwd().openFile(full_path, .{.read=true}) catch |err| {
                 // TODO: Handle debug page
-                // std.debug.warn("Static fille error: {}\n", .{err});
+                //log.warn("Static file error: {}", .{err});
                 return self.renderNotFound(request, response);
             };
 

@@ -124,6 +124,12 @@ pub const Headers = struct {
     pub const HeaderList = std.ArrayList(Header);
     headers: HeaderList,
 
+    pub fn init(allocator: *Allocator) Headers {
+        return Headers{
+            .headers = HeaderList.init(allocator),
+        };
+    }
+
     pub fn initCapacity(allocator: *Allocator, num: usize) !Headers {
         return Headers{
             .headers = try HeaderList.initCapacity(allocator, num),
@@ -206,8 +212,9 @@ pub const Headers = struct {
         self.headers.items.len = 0;
     }
 
-    // Assumes the streams current buffer will exist for the lifetime
-    // of the headers
+    /// Assumes the streams current buffer will exist for the lifetime
+    /// of the headers.
+    /// Note readbyteFast will not modify the buffer internal buffer
     pub fn parse(self: *Headers, buf: *Bytes, stream: *IOStream, max_size: usize) !void {
         // Reuse the request buffer for this
         var index: usize = undefined;
@@ -281,20 +288,21 @@ pub const Headers = struct {
             // Next
             try self.append(key.?, value.?);
         }
-        if (stream.readCount() == max_size) {
+        if (stream.readCount() > max_size) {
             return error.RequestHeaderFieldsTooLarge;
         }
 
     }
 
-    // TODO: How can I make this
-    pub fn parseBuffer(self: *Headers, data: []const u8) !void {
-        var empty = &[_]u8{};
-        var fba = std.heap.FixedBufferAllocator.init(empty);
-        var buf = Bytes.fromOwnedSlice(&fba.allocator, data);
-        defer buf.deinit(); // Noop
-        var stream = IOStream.fromBuffer(&buf);
-        try self.parse(&buf, &stream, data.len);
+    pub fn parseBuffer(self: *Headers, data: []const u8, max_size: usize) !void {
+        const hack = @bitCast([]u8, data); // HACK: Explicitly violate const
+        var fba = std.heap.FixedBufferAllocator.init(hack);
+        fba.end_index = data.len; // Ensure we don't modify the buffer
+
+        // Don't deinit since we don't actually own the data
+        var buf = Bytes.fromOwnedSlice(&fba.allocator, fba.buffer);
+        var stream = IOStream.fromBuffer(fba.buffer);
+        try self.parse(&buf, &stream, max_size);
     }
 
 };
@@ -305,6 +313,7 @@ test "headers-get" {
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
+    testing.expectError(error.KeyError, headers.get("Accept-Type"));
     testing.expectEqualSlices(u8, try headers.get("cookie"), "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("cOOKie"), "Nom;nom;nom");
     testing.expectEqualSlices(u8,
@@ -359,10 +368,11 @@ test "headers-parse" {
         \\
         \\
     ;
+
     const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
-    try headers.parseBuffer(HEADERS[0..]);
+    try headers.parseBuffer(HEADERS[0..], 1024);
 
     testing.expect(mem.eql(u8, try headers.get("Host"), "bs.serving-sys.com"));
     testing.expect(mem.eql(u8, try headers.get("Connection"), "keep-alive"));

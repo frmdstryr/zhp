@@ -4,6 +4,7 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
+const log = std.log;
 const ascii = std.ascii;
 const mem = std.mem;
 const testing = std.testing;
@@ -11,7 +12,6 @@ const Allocator = mem.Allocator;
 const Request = @import("web.zig").Request;
 const Headers = @import("web.zig").Headers;
 const util = @import("util.zig");
-const IOStream = util.IOStream;
 
 
 pub const HttpFile = struct {
@@ -42,6 +42,11 @@ pub const Form = struct {
         };
     }
 
+    pub fn deinit(self: *Form) void {
+        self.fields.deinit();
+        self.files.deinit();
+    }
+
     pub fn parse(self: *Form, request: *Request) !void {
         const content_type = try request.headers.get("Content-Type");
         try self.parseMultipart(content_type, request.body);
@@ -57,7 +62,6 @@ pub const Form = struct {
                 try self.parseMultipartFormData(boundary, data);
             }
         }
-
     }
 
     pub fn parseMultipartFormData(self: *Form, boundary: []const u8, data: []const u8) !void {
@@ -70,61 +74,69 @@ pub const Form = struct {
         }
 
         var buf: [74]u8 = undefined;
+
+        // Check final boundary
         const final_boundary = try std.fmt.bufPrint(&buf, "--{}--", .{bounds});
         const final_boundary_index = mem.lastIndexOf(u8, data, final_boundary);
         if (final_boundary_index == null) {
-            //std.debug.warn("Invalid multipart/form-data: no final boundary");
+            log.warn("Invalid multipart/form-data: no final boundary", .{});
             return error.MultipartFinalBoundaryMissing;
         }
 
         const separator = try std.fmt.bufPrint(&buf, "--{}\r\n", .{bounds});
 
-        var disp_params = std.StringHashMap([]const u8).init(self.allocator);
+        var fields = mem.split(data[0..final_boundary_index.?], separator);
+
+        // TODO: Make these capacities configurable
+        var headers = try Headers.initCapacity(self.allocator, 2);
+        defer headers.deinit();
+        var disp_params = try Headers.initCapacity(self.allocator, 2);
         defer disp_params.deinit();
 
-        var parts = mem.split(data[0..final_boundary_index.?], separator);
-        while (parts.next()) |part| {
+        while (fields.next()) |part| {
             if (part.len == 0) {
                 continue;
             }
-            const eoh = mem.indexOf(u8, part, "\r\n\r\n");
+            const header_sep = "\r\n\r\n";
+            const eoh = mem.lastIndexOf(u8, part, header_sep);
             if (eoh == null) {
-                std.debug.warn("multipart/form-data missing headers", .{});
+                log.warn("multipart/form-data missing headers: {}", .{part});
                 continue;
             }
 
-            // TODO: Use a buffer
-            var headers = try Headers.parse(allocator,
-                IOStream.fromFixedBuffer(part[0..eoh.?]), 1024);
-            defer headers.deinit();
+            const body = part[0..eoh.?+header_sep.len];
+            // NOTE: Do not free, data is assumed to be owned
+            // also do not do this after parsing or the it will cause a memory leak
+            headers.reset();
+            try headers.parseBuffer(body, body.len);
+
 
             const disp_header = headers.getDefault("Content-Disposition", "");
-            disp_params.clearAndFree();
-            const disposition = try parseHeader(disp_header, disp_params);
-            if (!mem.eql(u8, disposition, "form-data")
-                    or !mem.endsWith(u8, part, "\r\n")) {
-                std.debug.warn("Invalid multipart/form-data", .{});
+            disp_params.reset(); // NOTE: Do not free, data is assumed to be owned
+            const disposition = try parseHeader(self.allocator, disp_header, &disp_params);
+
+            if (!ascii.eqlIgnoreCase(disposition, "form-data")) {
+                log.warn("Invalid multipart/form-data", .{});
                 continue;
             }
 
-            var param = disp_params.getEntry("name");
-            if (param == null or param.?.value.len == 0) {
-                std.debug.warn("multipart/form-data value missing name", .{});
+            var field_name = disp_params.getDefault("name", "");
+            if (mem.eql(u8, field_name, "")) {
+                log.warn("multipart/form-data value missing name", .{});
                 continue;
             }
-            const name = param.?.value;
-            const value = part[eoh+4..part.len-2];
+            const field_value = part[body.len..part.len];
 
             if (disp_params.contains("filename")) {
-                var content_type = headers.get_default(
-                    "Content-Type", "application/unknown");
-                try self.files.append(name, HttpFile{
-                    .filename = disp_params.getEntry("filename").?.value,
-                    .body = value,
+                const content_type = headers.getDefault(
+                    "Content-Type", "application/octet-stream");
+                try self.files.append(field_name, HttpFile{
+                    .filename = disp_params.getDefault("filename", ""),
+                    .body = field_value,
                     .content_type = content_type,
                 });
             } else {
-                try self.fields.append(name, value);
+                try self.fields.append(field_name, field_value);
             }
         }
 
@@ -136,14 +148,19 @@ pub const Form = struct {
 
 test "simple-form" {
     const content_type = "multipart/form-data; boundary=---------------------------389538318911445707002572116565";
-    const body = \\-----------------------------389538318911445707002572116565
-                 \\Content-Disposition: form-data; name="name"
-                 \\
-                 \\Your name
-                 \\-----------------------------389538318911445707002572116565--
+    const body = "-----------------------------389538318911445707002572116565\r\n" ++
+                 "Content-Disposition: form-data; name=\"name\"\r\n" ++
+                 "\r\n" ++
+                 "Your name" ++
+                 "-----------------------------389538318911445707002572116565--\r\n"
     ;
-    var form = Form.init(std.heap.page_allocator);
+    var form = Form.init(std.testing.allocator);
+    defer form.deinit();
     try form.parseMultipart(content_type, body);
+    testing.expect(form.fields.get("name") != null);
+    const r = form.fields.get("name").?;
+    log.warn("{}\n", .{r});
+    testing.expectEqualSlices(u8, "Your name", r);
 }
 
 // fn _parseparam(param: []const u8) SplitIterator {
@@ -166,73 +183,73 @@ test "simple-form" {
 
 
 
-// Parse a Content-type like header.
-// Return the main content-type and update the params
-fn parseHeader(allocator: *Allocator, line: []const u8,
-               params: *std.StringHashMap([]const u8)) ![]const u8 {
+// Parse a header.
+// return the first value and update the params with everything else
+fn parseHeader(allocator: *Allocator, line: []const u8, params: *Headers) ![]const u8 {
     if (line.len == 0) return "";
     var it = mem.split(line, ";");
-    var header: ?[]const u8 = null;
-    var first = false;
+
+    // First part is returned as the main header value
+    const value = if (it.next()) |p| mem.trim(u8, p, " \r\n") else "";
+
+    // Now get the rest of the parameters
     while (it.next()) |p| {
-        if (first) {
-            first = false;
-            header = try ascii.allocLowerString(allocator,
-                mem.trim(u8, p, " \r\n"));
-            continue;
-        }
+        // Split on =
         var i = mem.indexOf(u8, p, "=");
         if (i == null) continue;
 
-        const name = try ascii.allocLowerString(allocator,
-            mem.trim(u8, p[0..i.?], " \r\n"));
-
-        var value = try collapseRfc2231Value(allocator,
-            mem.trim(u8, p[i.?..], " \r\n"));
-
-        try params.put(name, value);
+        const name = mem.trim(u8, p[0..i.?], " \r\n");
+        const encoded_value = mem.trim(u8, p[i.?+1..], " \r\n");
+        const decoded_value = try collapseRfc2231Value(allocator, encoded_value);
+        try params.append(name, decoded_value);
     }
     try decodeRfc2231Params(allocator, params);
-    return header.?;
+    return value;
 }
 
 fn collapseRfc2231Value(allocator: *Allocator, value: []const u8) ![]const u8 {
     // TODO: Implement this..
-    return value;
+    return mem.trim(u8, value, "\"");
 }
 
-fn decodeRfc2231Params(allocator: *Allocator, params: *std.StringHashMap([]const u8)) !void {
+fn decodeRfc2231Params(allocator: *Allocator, params: *Headers) !void {
     // TODO: Implement this..
 }
 
-test "parse-header" {
-    const allocator = std.heap.page_allocator;
-    const d = "form-data; foo=\"b\\\\a\\\"r\"; file*=utf-8''T%C3%A4st";
-    var params = std.StringHashMap([]const u8).init(allocator);
-    var ct = try parseHeader(allocator, d, params);
-    testing.expectEqualSlices(u8, ct, "form-data");
-    testing.expect(params.contains("file"));
-    testing.expect(params.contains("foo"));
+test "parse-content-disposition-header" {
+    const allocator = std.testing.allocator;
+    //const d = "form-data; foo=\"b\\\\a\\\"r\"; file*=utf-8''T%C3%A4st";
+    const d = " form-data; name=\"fieldName\"; filename=\"filename.jpg\"";
+    var params = try Headers.initCapacity(allocator, 5);
+    defer params.deinit();
+    var v = try parseHeader(allocator, d, &params);
+    testing.expectEqualSlices(u8, "form-data", v);
+    testing.expectEqualSlices(u8, "fieldName", try params.get("name"));
+    testing.expectEqualSlices(u8, "filename.jpg", try params.get("filename"));
 }
 
-// Inverse of parseHeader.
-fn encodeHeader(allocator: *Allocator, key: []const u8,
-                  params: std.StringHashMap([]const u8)) ![]const u8 {
-    if (params.count() == 0) {
-        return key;
+/// Inverse of parseHeader.
+/// This always returns a copy so it must be cleaned up!
+fn encodeHeader(allocator: *Allocator, key: []const u8, params: Headers) ![]const u8 {
+    if (params.headers.items.len == 0) {
+        return try mem.dupe(allocator, u8, key);
     }
-    var out = std.ArrayList([]const u8).init(allocator);
-    defer out.deinit();
+
+    // I'm lazy
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var out = std.ArrayList([]const u8).init(&arena.allocator);
     try out.append(key);
+
     // Sort the parameters just to make it easy to test.
-    var it = params.iterator();
-    while (it.next()) |entry| {
+    for (params.headers.items) |entry| {
         if (entry.value.len == 0) {
             try out.append(entry.key);
         } else {
             // TODO: quote if necessary.
             try out.append(
-                try std.fmt.allocPrint(allocator,
+                try std.fmt.allocPrint(&arena.allocator,
                     "{}={}", .{entry.key, entry.value}));
         }
     }
@@ -241,19 +258,22 @@ fn encodeHeader(allocator: *Allocator, key: []const u8,
 
 
 test "encode-header" {
-    const allocator = std.heap.page_allocator;
-    var params = std.StringHashMap([]const u8).init(allocator);
+    const allocator = std.testing.allocator;
+    var params = Headers.init(allocator);
+    defer params.deinit();
 
-    testing.expectEqualSlices(u8,
-        try encodeHeader(allocator, "permessage-deflate", params),
-        "permessage-deflate");
+    var r = try encodeHeader(allocator, "permessage-deflate", params);
+    testing.expectEqualSlices(u8, "permessage-deflate", r);
+    allocator.free(r);
 
-    var e = try params.put("client_max_window_bits", "15");
-    e = try params.put("client_no_context_takeover", "");
+    try params.append("client_no_context_takeover", "");
+    try params.append("client_max_window_bits", "15");
 
-    var header = try encodeHeader(allocator, "permessage-deflate", params);
-    testing.expectEqualSlices(u8, header,
+    r = try encodeHeader(allocator, "permessage-deflate", params);
+    testing.expectEqualSlices(u8, r,
         "permessage-deflate; client_no_context_takeover; client_max_window_bits=15");
+    allocator.free(r);
+
 }
 
 

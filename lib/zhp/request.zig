@@ -94,15 +94,6 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-
-    pub fn init(allocator: *Allocator) !Request {
-        return Request{
-            .buffer = try Bytes.initCapacity(allocator, mem.page_size),
-            .client = try Address.parseIp("0.0.0.0", 80),
-            .headers = try Headers.initCapacity(allocator, 64),
-        };
-    }
-
     pub fn initCapacity(allocator: *Allocator, buffer_size: usize,
                         max_headers: usize) !Request {
         return Request{
@@ -133,7 +124,7 @@ pub const Request = struct {
     pub fn parse(self: *Request, stream: *IOStream) !usize {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
-        try self.buffer.resize(mem.page_size);
+        self.buffer.expandToCapacity();
         stream.swapBuffer(self.buffer.items);
 
         // TODO: This should retry if the error is EndOfBuffer which means
@@ -177,7 +168,7 @@ pub const Request = struct {
             }
             ch = try stream.readByteFast();
         }
-        if (stream.readCount() == max_size) return error.RequestUriTooLong; // Too Big
+        if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
 
         // Read the method
         switch (ch) {
@@ -346,7 +337,7 @@ pub const Request = struct {
                 query_start = stream.readCount();
             }
         }
-        if (stream.readCount() == max_size) return error.RequestUriTooLong; // Too Big
+        if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
 
         const end = stream.readCount()-1;
         if (query_start) |q| {

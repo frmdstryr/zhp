@@ -14,6 +14,7 @@ const time = std.time;
 const meta = std.meta;
 const testing = std.testing;
 const assert = std.debug.assert;
+const log = std.log;
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -36,7 +37,7 @@ pub const Middleware = @import("middleware.zig").Middleware;
 
 
 pub const ServerRequest = struct {
-    const STACK_SIZE = 1*1024;
+    const STACK_SIZE = 10*1024;
     allocator: *Allocator,
     application: *Application,
     //stack_frame: []align(std.Target.stack_align) u8 = undefined,
@@ -49,20 +50,28 @@ pub const ServerRequest = struct {
     request: Request,
     response: Response,
 
+    err: ?anyerror = null,
+
     pub fn init(allocator: *Allocator, application: *Application) !ServerRequest {
         return ServerRequest{
             .allocator = allocator,
             .application = application,
             //.stack_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, 1024),
-            .storage = try allocator.alloc(u8, 1024*1024),
-            .request = try Request.initCapacity(allocator, mem.page_size, 32),
-            .response = try Response.initCapacity(allocator, mem.page_size, 10),
+            .storage = try allocator.alloc(
+                u8, application.options.handler_buffer_size),
+            .request = try Request.initCapacity(
+                allocator,
+                application.options.request_buffer_size,
+                application.options.max_header_count),
+            .response = try Response.initCapacity(
+                allocator,
+                application.options.response_buffer_size,
+                application.options.response_header_count),
         };
     }
 
     // This should be in init but doesn't work due to return results being copied
     pub fn prepare(self: *ServerRequest) void {
-        // TODO: Use custom ArenaAllocator with pre-allocated storage
         self.buffer = std.heap.FixedBufferAllocator.init(self.storage);
 
         // Setup the stream
@@ -89,6 +98,7 @@ pub const ServerRequest = struct {
         self.buffer.reset();
         self.request.reset();
         self.response.reset();
+        self.err = null;
     }
 
     // Release this request back into the pool
@@ -103,7 +113,7 @@ pub const ServerRequest = struct {
     pub fn deinit(self: *ServerConnection) void {
         self.request.deinit();
         self.response.deinit();
-        self.allocator.free(self.stack_frame);
+        //self.allocator.free(self.stack_frame);
         self.allocator.free(self.storage);
     }
 
@@ -117,7 +127,7 @@ pub const ServerConnection = struct {
     const Frame = @Frame(startRequestLoop);
     const RequestList = std.ArrayList(*ServerRequest);
     application: *Application,
-    io: IOStream,
+    io: IOStream = undefined,
     address: net.Address = undefined,
     frame: *Frame,
     // Outstanding requests
@@ -127,8 +137,7 @@ pub const ServerConnection = struct {
         return ServerConnection{
             .application = application,
             //.storage = try allocator.alloc(u8, 100*1024),
-            .io = try IOStream.initCapacity(
-                allocator, null, 0, mem.page_size),
+            .io = try IOStream.initCapacity(allocator, null, 0, mem.page_size),
             .frame = try allocator.create(Frame),
             //.server_request = try ServerRequest.init(allocator, application),
             //.requests = try RequestList.initCapacity(allocator, 8),
@@ -138,6 +147,12 @@ pub const ServerConnection = struct {
     // Handles a connection
     pub fn startRequestLoop(self: *ServerConnection,
                             conn: net.StreamServer.Connection) !void {
+        self.requestLoop(conn) catch |err| {
+            log.err("server error: {}", .{@errorName(err)});
+        };
+    }
+
+    fn requestLoop(self: *ServerConnection, conn: net.StreamServer.Connection) !void {
         self.address = conn.address;
         const app = self.application;
         const params = &app.options;
@@ -172,31 +187,8 @@ pub const ServerConnection = struct {
             defer server_request.reset();
 
             // Parse the request line and headers
-            const n = request.parse(&self.io) catch |err| switch (err) {
-                error.BadRequest => {
-                    _ = try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-                    return;
-                },
-                error.MethodNotAllowed => {
-                    _= try stream.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
-                    return;
-                },
-                error.RequestEntityTooLarge => {
-                    _ = try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
-                    return;
-                },
-                error.RequestUriTooLong => {
-                    _ = try stream.write("HTTP/1.1 413 Request-URI Too Long\r\n\r\n");
-                    return;
-                },
-                error.RequestHeaderFieldsTooLarge => {
-                    _ = try stream.write("HTTP/1.1 431 Request Header Fields Too Large\r\n\r\n");
-                    return;
-                },
-                //error.TimeoutError,
-                error.ConnectionResetByPeer,
-                error.EndOfStream => return,
-                else => return err,
+            _ = request.parse(&self.io) catch |err| {
+                server_request.err = err;
             };
 
             const keep_alive = self.canKeepAlive(request);
@@ -204,40 +196,35 @@ pub const ServerConnection = struct {
             // Get the handler
             const factoryFn = try app.processRequest(self, request, response);
 
-            // Read the body if any
-            self.readBody(request, response) catch |err| switch(err) {
-                //error.ImproperlyTerminatedChunk,
-                error.BadRequest => {
-                    _ = try stream.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-                    return;
-                },
-                error.RequestEntityTooLarge => {
-                    _ = try stream.write("HTTP/1.1 413 Request Entity Too Large\r\n\r\n");
-                    return;
-                },
-                // error.TimeoutError,
-                error.ConnectionResetByPeer,
-                error.EndOfStream => return,
-                else => return err,
-            };
-
-            // At this point all reads on the request are done
-            // this could be spawn off into an async response for http/2
-            if (factoryFn) |factory| {
-                var handler = try server_request.buildHandler(
-                    factory, request, response);
-                handler.execute() catch |err| {
-                    handler.deinit();
-                    var error_handler = try server_request.buildHandler(
-                        app.error_handler, request, response);
-                    defer error_handler.deinit();
-                    error_handler.err = err;
-                    try error_handler.execute();
+            // If no error occurred read the body
+            if (server_request.err == null) {
+                self.readBody(request, response) catch |err| {
+                    server_request.err = err;
                 };
-                //handler.deinit();
+
+                // At this point all reads on the request are done
+                // this could be spawn off into an async response for http/2
+                if (factoryFn) |factory| {
+                    var handler = try server_request.buildHandler(
+                        factory, request, response);
+
+                    handler.execute() catch |err| {
+                        server_request.err = err;
+                    };
+                    //handler.deinit();
+                }
             }
 
-             try app.processResponse(self, request, response);
+            // If an error ocurred invoke the error handler
+            if (server_request.err) |err| {
+                var error_handler = try server_request.buildHandler(
+                    app.error_handler, request, response);
+                defer error_handler.deinit();
+                error_handler.err = err;
+                try error_handler.execute();
+            }
+
+            try app.processResponse(self, request, response);
 
             // Request handler already sent the response
             if (self.io.closed or response.finished) return;
@@ -277,7 +264,7 @@ pub const ServerConnection = struct {
             // and has an implicit length of zero instead of read-until-close.
             // http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.3
             if (headers.contains("Transfer-Encoding") or !(content_length == 0)) {
-                //std.debug.warn(
+                //log.warn(
                 //    "Response with code {} should not have a body", .{code});
                 return error.BadRequest;
             }
@@ -285,10 +272,9 @@ pub const ServerConnection = struct {
         }
 
         // FIXME: There needs to be some limit here
-        if (content_length > 0) {
-            if (content_length > params.max_body_size) {
-                return error.RequestEntityTooLarge;
-            }
+        if (content_length > params.max_body_size) {
+            return error.RequestEntityTooLarge;
+        } else if (content_length > 0) {
             try self.readFixedBody(request);
         }
         //} else if (headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
@@ -304,11 +290,10 @@ pub const ServerConnection = struct {
         // End of the request
         const end_of_request = request.head.len;
 
-        // Resize the buffer to fit the rest
-        try request.buffer.resize(request.content_length + end_of_request);
-
         // Anything else is the body
-        var body = request.buffer.items[end_of_request..];
+        const end_of_body = request.content_length + end_of_request;
+        const end = std.math.min(request.buffer.capacity, end_of_body);
+        const body = request.buffer.items[end_of_request..end];
 
         // Take whatever is still buffered
         const amt = self.io.consumeBuffered(request.content_length);
@@ -323,6 +308,12 @@ pub const ServerConnection = struct {
             self.io.readUnbuffered(true);
             defer self.io.readUnbuffered(false);
             try stream.readNoEof(buf);
+
+            if (end != end_of_body) {
+                // FIXME: Need to spool to file
+                return error.RequestTooLarge;
+            }
+
         } // otherwise the body is already in the request buffer
 
         request.body = body;
@@ -681,13 +672,31 @@ pub const Application = struct {
         protocol: []const u8 = "HTTP/1.1",
         decompress_request: bool = false,
         chunk_size: u32 = 65536,
-        max_header_size: u32 = 65536,
+
+        /// Will only parse this many request headers
+        max_header_count: u8 = 32,
+
+        /// Size of request buffer
+        request_buffer_size: u32 = 65536,
+
+        // Fixed memory buffer size for request handlers to allocate in
+        handler_buffer_size: u32 = 5*1024,
+
+        // If the content length is over the request buffer size
+        // it will spool to a temp file on disk up to this size
+        max_body_size: u64 = 5*1000*1000, // 5 MB
+
+        /// Size of response buffer
+        response_buffer_size: u32 = 65536,
+
+        /// Initial number of response headers to allocate
+        response_header_count: u8 = 12,
 
         // Timeout in millis
         idle_connection_timeout: u32 = 300 * time.ms_per_s,  // 5 min
         header_timeout: u32 = 300 * time.ms_per_s,  // 5 min
         body_timeout: u32 = 900 * time.ms_per_s, // 15 min
-        max_body_size: u64 = 100*1000*1000, // 100 MB
+
 
         // List of trusted downstream (ie proxy) servers
         trusted_downstream: ?[][]const u8 = null,
@@ -820,11 +829,11 @@ pub const Application = struct {
             server_conn.io.close();
             n += 1;
         }
-        std.debug.warn(" Closed {} connections.\n", .{n});
+        log.info(" Closed {} connections.\n", .{n});
     }
 
     pub fn deinit(self: *Application) void {
-        std.debug.warn(" Shutting down...\n", .{});
+        log.info(" Shutting down...\n", .{});
         self.closeAllConnections();
         self.server.deinit();
         self.connection_pool.deinit();

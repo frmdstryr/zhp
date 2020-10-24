@@ -61,7 +61,7 @@ pub const IOStream = struct {
     const Self = @This();
 
     allocator: ?*Allocator = null,
-    in_buffer: []const u8 = undefined,
+    in_buffer: []u8 = undefined,
     out_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
     _in_end_index: usize = 0,
@@ -80,7 +80,7 @@ pub const IOStream = struct {
         return IOStream{
             .in_file = file,
             .out_file = file,
-            .in_buffer = &[_]const u8{},
+            .in_buffer = &[_]u8{},
             .out_buffer = &[_]u8{},
         };
     }
@@ -100,13 +100,13 @@ pub const IOStream = struct {
 
     // Used to read only from a fixed buffer
     // the buffer must exist for the lifetime of the stream (or until swapped)
-    pub fn fromBuffer(buffer: *Bytes) IOStream {
+    pub fn fromBuffer(in_buffer: []u8) IOStream {
         return IOStream{
             .in_file = invalid_file,
             .out_file = invalid_file,
-            .in_buffer = buffer.items,
+            .in_buffer = in_buffer,
             ._in_start_index = 0,
-            ._in_end_index = buffer.items.len,
+            ._in_end_index = in_buffer.len,
         };
     }
 
@@ -118,7 +118,7 @@ pub const IOStream = struct {
             .allocator = allocator,
             .in_file = try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
             .out_file = try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
-            .in_buffer = in_buffer,
+            .in_buffer = try mem.dupe(allocator, u8, in_buffer),
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
         };
@@ -126,7 +126,7 @@ pub const IOStream = struct {
 
     // Load into the in buffer for testing purposes
     pub fn load(self: *Self, allocator: *Allocator, in_buffer: []const u8) !void {
-        self.in_buffer = in_buffer;
+        self.in_buffer = try mem.dupe(allocator, u8, in_buffer);
         self._in_start_index = 0;
         self._in_end_index = in_buffer.len;
     }
@@ -170,7 +170,7 @@ pub const IOStream = struct {
 
     // Swap the current buffer with a new buffer copying any unread bytes
     // into the new buffer
-    pub fn swapBuffer(self: *Self, buffer: []const u8) void {
+    pub fn swapBuffer(self: *Self, buffer: []u8) void {
         //const left = self.amountBuffered();
 
         // Reset counter

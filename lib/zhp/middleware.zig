@@ -5,6 +5,7 @@
 // -------------------------------------------------------------------------- //
 const std = @import("std");
 const web = @import("web.zig");
+const log = std.log;
 const Request = web.Request;
 const Response = web.Response;
 
@@ -65,7 +66,7 @@ pub const LoggingMiddleware = struct {
         const self = @fieldParentPtr(LoggingMiddleware, "middleware", middleware);
 
         // TODO: This is not async
-        std.debug.warn("{} {} {} ({}) {}\n", .{
+        log.info("{} {} {} ({}) {}", .{
             response.status.code,
             @tagName(request.method),
             request.path,

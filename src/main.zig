@@ -40,7 +40,7 @@ const StreamHandler = struct {
         while (i >= 0) : (i -= 1) {
             try response.stream.writeAll(buf[0..]);
         }
-        std.debug.warn("Done!\n");
+        std.log.warn("Done!\n");
     }
 
 };
@@ -53,7 +53,7 @@ const TemplateHandler = struct {
     pub fn get(self: *TemplateHandler, request: *web.Request,
                response: *web.Response) !void {
         @setEvalBranchQuota(100000);
-        try response.stream.print(template, .{"Custom title"});
+        try response.stream.print(template, .{"ZHP"});
     }
 
 };
@@ -95,7 +95,9 @@ const FormHandler = struct {
                response: *web.Response) !void {
         try response.stream.writeAll(
             \\<form action="/form/" method="post" enctype="multipart/form-data">
-            \\<input type="text" name="name" value="Your name">
+            \\<input type="text" name="name" value="Your name"><br />
+            \\<input type="checkbox" name="agree" /><label>Do you like Zig?</label><br />
+            \\<input type="file" name="image" /><label>Upload</label><br />
             \\<button type="submit">Submit</button>
             \\</form>
         );
@@ -109,11 +111,18 @@ const FormHandler = struct {
         };
         if (std.mem.startsWith(u8, content_type, "multipart/form-data")) {
             var form = web.forms.Form.init(response.allocator);
-            //try form.parse(request);
+            try form.parse(request);
             try response.stream.print(
                 \\<h1>Hello: {}</h1>
-                , .{form.fields.get("name") orelse ""}
+                , .{if (form.fields.get("name")) |name| name else ""}
             );
+
+            if (form.fields.get("agree")) |f| {
+                try response.stream.writeAll("Me too!");
+            } else {
+                try response.stream.writeAll("Aww sorry!");
+            }
+
             try response.stream.print(
                 \\<h1>Request: {}</h1>
                 , .{request.body});
@@ -128,7 +137,7 @@ const FormHandler = struct {
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(gpa.deinit());
+    defer std.debug.assert(!gpa.deinit());
     const allocator = &gpa.allocator;
 
     const routes = &[_]web.Route{
@@ -149,7 +158,7 @@ pub fn main() !void {
 
     // Logger
     var logger = zhp.middleware.LoggingMiddleware{};
-    //try app.middleware.append(&logger.middleware);
+    try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
