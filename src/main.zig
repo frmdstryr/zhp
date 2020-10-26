@@ -26,21 +26,33 @@ const StreamHandler = struct {
     // Dump a random stream of crap
     pub fn get(self: *StreamHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.headers.append("Content-Type", "application/octet-stream");
-        try response.headers.append("Content-Disposition",
-            "attachment; filename=\"random.bin\"");
-        //try response.headers.put("Content-Length", "4096000");
+        try response.headers.append("Content-Type", "text/plain");
+        //try response.headers.append("Content-Disposition",
+        //    "attachment; filename=\"stream.txt\"");
 
-        // TODO: Support streamign somehow
-        //response.streaming = true;
-        var r = std.rand.DefaultPrng.init(765432);
-        var buf: [4096]u8 = undefined;
-        r.random.bytes(buf[0..]);
-        var i: usize = 1000;
-        while (i >= 0) : (i -= 1) {
-            try response.stream.writeAll(buf[0..]);
+        // This will cause the application to send the headers
+        // then invoke the stream function which can send an unlimited
+        // amount of data
+        response.send_stream = true;
+    }
+
+    pub fn stream(self: *StreamHandler, io: *web.IOStream) !usize {
+        defer io.close();
+        var total_wrote: usize = 0;
+        var i: usize = 0;
+        var writer = io.writer();
+        while (i < 10) : (i += 1) {
+            // Copy directly to output buffer
+
+            try writer.print("{}\n", .{"Hello world"});
+            try io.flush(); // Send it out the pipe
+            //total_wrote += io.out_buffer.len;
+
+            // Simulate doing something...
+            // TODO: Non blocking?
+            std.time.sleep(1*std.time.ns_per_s);
         }
-        std.log.warn("Done!\n");
+        return total_wrote;
     }
 
 };
@@ -153,12 +165,12 @@ pub fn main() !void {
     var app = web.Application.init(.{
         .allocator=allocator,
         .routes=routes[0..],
-        .debug=true,
+        //.debug=true,
     });
 
     // Logger
     var logger = zhp.middleware.LoggingMiddleware{};
-    try app.middleware.append(&logger.middleware);
+    //try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);

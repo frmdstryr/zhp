@@ -390,6 +390,22 @@ pub const Request = struct {
     //}
 
 
+    pub fn format(
+        self: Request,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        try std.fmt.format(out_stream, "Request{{", .{});
+        try std.fmt.format(out_stream, ".client={}, ", .{self.client});
+        try std.fmt.format(out_stream, ".method={}, ", .{self.method});
+        try std.fmt.format(out_stream, ".version={}, ", .{self.version});
+        try std.fmt.format(out_stream, ".scheme={}, ", .{self.scheme});
+        try std.fmt.format(out_stream, ".uri={}, ", .{self.uri});
+        try std.fmt.format(out_stream, ".headers={}, ", .{self.headers});
+        try std.fmt.format(out_stream, "}}", .{});
+    }
+
     // ------------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------------

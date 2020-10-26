@@ -140,6 +140,19 @@ pub const Headers = struct {
         self.headers.deinit();
     }
 
+    pub fn format(
+        self: Headers,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        try std.fmt.format(out_stream, "Headers{{", .{});
+        for (self.headers.items) |header| {
+            try std.fmt.format(out_stream, "{}:\"{}\", ", .{header.key, header.value});
+        }
+        try std.fmt.format(out_stream, "}}", .{});
+    }
+
     // Get the value for the given key
     pub fn get(self: *Headers, key: []const u8) ![]const u8 {
         const i = try self.lookup(key);

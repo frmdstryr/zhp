@@ -29,25 +29,44 @@ pub const ServerErrorHandler = struct {
         comptime const key = "{% stacktrace %}";
         comptime const start = mem.indexOf(u8, template, key).?;
         comptime const end = start + key.len;
+        //@breakpoint();
 
-        // Send it
-        try response.stream.print(template[0..start], .{default_stylesheet});
 
-        // Dump stack trace
-        if (self.handler.err) |err| {
-            try response.stream.print("error: {}\n", .{@errorName(err)});
+        if (self.handler.application.options.debug) {
+            // Send it
+            try response.stream.print(template[0..start], .{default_stylesheet});
+
+            // Dump stack trace
+            if (self.handler.err) |err| {
+                try response.stream.print("error: {}\n", .{@errorName(err)});
+            }
+            if (@errorReturnTrace()) |trace| {
+                try std.debug.writeStackTrace(
+                    trace.*,
+                    &response.stream,
+                    response.allocator,
+                    try std.debug.getSelfDebugInfo(),
+                    .no_color);
+            }
+
+            // Dump request and end of page
+            try response.stream.print(template[end..], .{request});
+        } else {
+            if (@errorReturnTrace()) |trace| {
+                const stderr = std.io.getStdErr().writer();
+                const held = std.debug.getStderrMutex().acquire();
+                defer held.release();
+
+                try std.debug.writeStackTrace(
+                    trace.*,
+                    &stderr,
+                    response.allocator,
+                    try std.debug.getSelfDebugInfo(),
+                    std.debug.detectTTYConfig());
+            }
+
+            try response.stream.writeAll("<h1>Server Error</h1>");
         }
-        if (@errorReturnTrace()) |trace| {
-            try std.debug.writeStackTrace(
-                trace.*,
-                &response.stream,
-                response.allocator,
-                try std.debug.getSelfDebugInfo(),
-                .no_color);
-        }
-
-        // Dump request and end of page
-        try response.stream.print(template[end..], .{request});
     }
 
 };
@@ -71,8 +90,9 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
     }
     // TODO: Should the root be checked if it exists?
     return  struct {
-        handler: web.RequestHandler,
         const Self = @This();
+        handler: web.RequestHandler,
+        file: ?fs.File = null,
 
         pub fn get(self: *Self, request: *web.Request,
                    response: *web.Response) !void {
@@ -119,8 +139,19 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             }
 
             response.status = responses.OK;
-            response.body.items.len = stat.size; // This sets the content length
-            response.source_stream = file.inStream();
+            var l = try std.fmt.allocPrint(response.allocator, "{}", .{stat.size});
+            try response.headers.append("Content-Length", l);
+            self.file = file;
+            response.send_stream = true;
+        }
+
+        pub fn stream(self: *Self, io: *web.IOStream) !usize {
+            var total_wrote: usize = 0;
+            if (self.file) |file| {
+                defer file.close();
+                total_wrote = try io.writeFromReader(file.reader());
+            }
+            return total_wrote;
         }
 
         pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {

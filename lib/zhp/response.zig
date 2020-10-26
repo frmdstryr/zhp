@@ -10,9 +10,10 @@ const responses = @import("status.zig");
 const Status = @import("status.zig").Status;
 const Headers = @import("headers.zig").Headers;
 const Request = @import("request.zig").Request;
+const web = @import("web.zig");
+const IOStream = @import("util.zig").IOStream;
 
 pub const Bytes = std.ArrayList(u8);
-
 
 
 pub const Response = struct {
@@ -32,7 +33,7 @@ pub const Response = struct {
     body: Bytes,
 
     // If this is set, the response will read from the stream
-    source_stream: ?std.fs.File.Reader = null,
+    send_stream: bool = false,
 
     // Set to true if your request handler already sent everything
     finished: bool = false,
@@ -58,10 +59,7 @@ pub const Response = struct {
         self.disconnect_on_finish = false;
         self.chunking_output = false;
         self.finished = false;
-        if (self.source_stream) |stream| {
-            stream.context.close();
-            self.source_stream = null;
-        }
+        self.send_stream = false;
     }
 
     // Write into the body buffer

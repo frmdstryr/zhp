@@ -130,6 +130,7 @@ pub const ServerConnection = struct {
     io: IOStream = undefined,
     address: net.Address = undefined,
     frame: *Frame,
+    handler: ?*RequestHandler = null,
     // Outstanding requests
     //requests: RequestList,
 
@@ -150,6 +151,7 @@ pub const ServerConnection = struct {
         self.requestLoop(conn) catch |err| {
             log.err("server error: {}", .{@errorName(err)});
         };
+        log.debug("Closed {}", .{conn});
     }
 
     fn requestLoop(self: *ServerConnection, conn: net.StreamServer.Connection) !void {
@@ -185,43 +187,56 @@ pub const ServerConnection = struct {
         // Start serving requests
         while (true) {
             defer server_request.reset();
+            defer if (self.handler) |handler| {
+                handler.deinit();
+                self.handler = null;
+            };
 
             // Parse the request line and headers
             _ = request.parse(&self.io) catch |err| {
                 server_request.err = err;
             };
 
-            const keep_alive = self.canKeepAlive(request);
-
-            // Get the handler
-            const factoryFn = try app.processRequest(self, request, response);
-
             // If no error occurred read the body
             if (server_request.err == null) {
                 self.readBody(request, response) catch |err| {
                     server_request.err = err;
                 };
+            }
+
+            // Body read ok, now read the request
+            if (server_request.err == null) {
+                // Get the handler
+                const factoryFn = try app.processRequest(self, request, response);
 
                 // At this point all reads on the request are done
                 // this could be spawn off into an async response for http/2
                 if (factoryFn) |factory| {
-                    var handler = try server_request.buildHandler(
+                    self.handler = try server_request.buildHandler(
                         factory, request, response);
 
+                    const handler = self.handler.?;
                     handler.execute() catch |err| {
                         server_request.err = err;
                     };
-                    //handler.deinit();
                 }
             }
 
-            // If an error ocurred invoke the error handler
+            // If an error ocurred during parsing or running the handler
+            // invoke the error handler
             if (server_request.err) |err| {
-                var error_handler = try server_request.buildHandler(
+                log.debug("Handling error: {}", .{err});
+                self.handler = try server_request.buildHandler(
                     app.error_handler, request, response);
-                defer error_handler.deinit();
-                error_handler.err = err;
-                try error_handler.execute();
+                const handler = self.handler.?;
+                handler.err = err;
+                try handler.execute();
+                switch (err) {
+                    error.EndOfStream, error.ConnectionResetByPeer => {
+                        self.io.closed = true; // Make sure no response is sent
+                    },
+                    else=>{},
+                }
             }
 
             try app.processResponse(self, request, response);
@@ -229,6 +244,8 @@ pub const ServerConnection = struct {
             // Request handler already sent the response
             if (self.io.closed or response.finished) return;
             try self.sendResponse(request, response);
+
+            const keep_alive = self.canKeepAlive(request);
             if (self.io.closed or !keep_alive) return;
         }
     }
@@ -354,7 +371,7 @@ pub const ServerConnection = struct {
         }
 
         // Send content length if missing otherwise the client hangs reading
-        if (!response.headers.contains("Content-Length")) {
+        if (!response.send_stream and !response.headers.contains("Content-Length")) {
             try stream.print("Content-Length: {}\r\n", .{response.body.items.len});
         }
 
@@ -369,13 +386,14 @@ pub const ServerConnection = struct {
 //             try stream.write("0\r\n\r\n");
 //         }
         var total_wrote: usize = 0;
-        if (response.source_stream != null)  {
-            const source = &response.source_stream.?;
-
+        if (response.send_stream) {
             // Empty the output buffer
             try self.io.flush();
-            // Send the stream
-            total_wrote = try self.io.writeFromReader(source);
+            if (self.handler) |handler| {
+                total_wrote += try handler.startStreaming(&self.io);
+            } else {
+                return error.ServerError; // Stream set but no stream fn!
+            }
         } else if (response.body.items.len > 0) {
             try stream.writeAll(response.body.items);
             total_wrote += response.body.items.len;
@@ -386,8 +404,8 @@ pub const ServerConnection = struct {
 
         // Make sure the content-length was correct otherwise the client
         // will hang waiting
-        if (total_wrote != response.body.items.len) {
-            std.debug.warn("Invalid content-length: {} != {}\n",
+        if (!response.send_stream and total_wrote != response.body.items.len) {
+            log.warn("Invalid content-length: {} != {}",
                 .{total_wrote, response.body.items.len});
             return error.InvalidContentLength;
         }
@@ -430,7 +448,10 @@ pub const RequestHandler = struct {
             fn(self: *RequestHandler) callconv(.Async) anyerror!void
         else
             fn(self: *RequestHandler) anyerror!void;
-
+    const StreamFn = if (std.io.is_async)
+            fn(self: *RequestHandler, out_stream: *IOStream) callconv(.Async) anyerror!usize
+        else
+            fn(self: *RequestHandler, out_stream: *IOStream) anyerror!usize;
 
     application: *Application,
     request: *Request,
@@ -448,6 +469,7 @@ pub const RequestHandler = struct {
     patch: HandlerFn = defaultHandler,
     put: HandlerFn = defaultHandler,
     options: HandlerFn = defaultHandler,
+    stream: ?StreamFn = null,
     destroy: fn(self: *RequestHandler) void,
 
     // Execute the request handler by running the dispatch function
@@ -495,6 +517,15 @@ pub const RequestHandler = struct {
         self.destroy(self);
     }
 
+    pub fn startStreaming(self: *RequestHandler, out_stream: *IOStream) !usize {
+        if (self.stream) |stream_fn| {
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            var f = await @asyncCall(&stack_frame, {}, stream_fn, .{self, out_stream});
+            return try f;
+        }
+        return 0;
+    }
+
 };
 
 
@@ -523,6 +554,7 @@ pub fn createHandler(comptime T: type) Handler {
                     .patch = if (@hasDecl(T, "patch")) Self.patch else defaultHandler,
                     .put = if (@hasDecl(T, "put")) Self.put else defaultHandler,
                     .options = if (@hasDecl(T, "options")) Self.options else defaultHandler,
+                    .stream = if (@hasDecl(T, "stream")) Self.stream else null,
                     .destroy = Self.destroy,
                 },
             };
@@ -572,6 +604,11 @@ pub fn createHandler(comptime T: type) Handler {
         pub fn destroy(req: *RequestHandler) void {
             const handler = @fieldParentPtr(T, "handler", req);
             //req.allocator.destroy(handler);
+        }
+
+        pub fn stream(req: *RequestHandler, out_stream: *IOStream) !usize {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.stream(out_stream);
         }
     };
 
@@ -767,6 +804,7 @@ pub const Application = struct {
             lock.release();
 
             const conn = try self.server.accept();
+            log.debug("Accepted {}", .{conn});
 
             // Start processing requests
             if (comptime std.io.is_async) {
@@ -829,11 +867,11 @@ pub const Application = struct {
             server_conn.io.close();
             n += 1;
         }
-        log.info(" Closed {} connections.\n", .{n});
+        log.info(" Closed {} connections.", .{n});
     }
 
     pub fn deinit(self: *Application) void {
-        log.info(" Shutting down...\n", .{});
+        log.info(" Shutting down...", .{});
         self.closeAllConnections();
         self.server.deinit();
         self.connection_pool.deinit();

@@ -20,10 +20,11 @@ script:
     - zig test -OReleaseSafe lib/zhp/util.zig
     - zig test -OReleaseSafe lib/zhp/request.zig
     - zig test -OReleaseSafe lib/zhp/response.zig
+    - zig test -OReleaseSafe lib/zhp/forms.zig
 
 
     # Make sure this repo builds
-    - zig build -Drelease-fast=true install
+    - zig build -Drelease-safe=true install
 
     # Test example server
     - zig run tests/bench.zig

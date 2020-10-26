@@ -121,7 +121,7 @@ pub const Form = struct {
             }
 
             var field_name = disp_params.getDefault("name", "");
-            if (mem.eql(u8, field_name, "")) {
+            if (field_name.len == 0) {
                 log.warn("multipart/form-data value missing name", .{});
                 continue;
             }
