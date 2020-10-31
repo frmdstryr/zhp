@@ -69,6 +69,7 @@ pub const IOStream = struct {
     _out_count: usize = 0,
     _out_index: usize = 0,
     closed: bool = false,
+    owns_in_buffer: bool = true,
     unbuffered: bool = false,
     in_file: File,
     out_file: File,
@@ -93,6 +94,7 @@ pub const IOStream = struct {
             .out_file = if (file) |f| f else try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
             .in_buffer = try allocator.alloc(u8, in_capacity),
             .out_buffer = try allocator.alloc(u8, out_capacity),
+            .owns_in_buffer = in_capacity == 0,
             ._in_start_index = in_capacity,
             ._in_end_index = in_capacity,
         };
@@ -105,6 +107,7 @@ pub const IOStream = struct {
             .in_file = invalid_file,
             .out_file = invalid_file,
             .in_buffer = in_buffer,
+            .owns_in_buffer = false,
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
         };
@@ -119,6 +122,7 @@ pub const IOStream = struct {
             .in_file = try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
             .out_file = try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
             .in_buffer = try mem.dupe(allocator, u8, in_buffer),
+            .owns_in_buffer = in_buffer.len > 0,
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
         };
@@ -172,7 +176,6 @@ pub const IOStream = struct {
     // into the new buffer
     pub fn swapBuffer(self: *Self, buffer: []u8) void {
         //const left = self.amountBuffered();
-
         // Reset counter
         self._in_count = 0;
 
@@ -184,6 +187,8 @@ pub const IOStream = struct {
         self._in_start_index = buffer.len;
         self._in_end_index = buffer.len;
         self.unbuffered = false;
+        // So we know not to free the in buf at deinit
+        self.owns_in_buffer = false;
     }
 
     // Switch between buffered and unbuffered reads
@@ -392,7 +397,11 @@ pub const IOStream = struct {
     pub fn deinit(self: *Self) void {
         if (!self.closed) self.close();
         if (self.allocator) |allocator| {
-            allocator.free(self.in_buffer);
+
+            // If the buffer was swapped assume that it is no longer owned
+            if (self.owns_in_buffer) {
+                allocator.free(self.in_buffer);
+            }
             allocator.free(self.out_buffer);
         }
     }
@@ -508,6 +517,16 @@ pub fn StringArrayMap(comptime T: type) type {
                 self.allocator.destroy(array);
             }
             self.storage.deinit();
+        }
+
+        pub fn reset(self: *Self) void {
+            // Deinit each array
+            var it = self.storage.iterator();
+            while (it.pop()) |entry| {
+                const array = entry.value;
+                array.deinit();
+                self.allocator.destroy(array);
+            }
         }
 
         pub fn append(self: *Self, name: []const u8, arg: T) !void {

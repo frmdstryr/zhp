@@ -87,7 +87,7 @@ pub const Form = struct {
 
         var fields = mem.split(data[0..final_boundary_index.?], separator);
 
-        // TODO: Make these capacities configurable
+        // TODO: Make these default capacities configurable
         var headers = try Headers.initCapacity(self.allocator, 2);
         defer headers.deinit();
         var disp_params = try Headers.initCapacity(self.allocator, 2);
@@ -128,7 +128,7 @@ pub const Form = struct {
             const field_value = part[body.len..part.len];
 
             if (disp_params.contains("filename")) {
-                const content_type = headers.getDefault(
+                const content_type = disp_params.getDefault(
                     "Content-Type", "application/octet-stream");
                 try self.files.append(field_name, HttpFile{
                     .filename = disp_params.getDefault("filename", ""),
@@ -148,39 +148,64 @@ pub const Form = struct {
 
 test "simple-form" {
     const content_type = "multipart/form-data; boundary=---------------------------389538318911445707002572116565";
-    const body = "-----------------------------389538318911445707002572116565\r\n" ++
-                 "Content-Disposition: form-data; name=\"name\"\r\n" ++
-                 "\r\n" ++
-                 "Your name" ++
-                 "-----------------------------389538318911445707002572116565--\r\n"
+    const body =
+        "-----------------------------389538318911445707002572116565\r\n" ++
+        "Content-Disposition: form-data; name=\"name\"\r\n" ++
+        "\r\n" ++
+        "Your name" ++
+        "-----------------------------389538318911445707002572116565\r\n" ++
+        "Content-Disposition: form-data; name=\"action\"\r\n" ++
+        "\r\n" ++
+        "1" ++
+        "-----------------------------389538318911445707002572116565--\r\n"
     ;
     var form = Form.init(std.testing.allocator);
     defer form.deinit();
     try form.parseMultipart(content_type, body);
-    testing.expect(form.fields.get("name") != null);
-    const r = form.fields.get("name").?;
-    log.warn("{}\n", .{r});
-    testing.expectEqualSlices(u8, "Your name", r);
+    testing.expectEqualStrings("Your name", form.fields.get("name").?);
+    testing.expectEqualStrings("1", form.fields.get("action").?);
 }
 
-// fn _parseparam(param: []const u8) SplitIterator {
-//     var s = param[..];
-//     while (mem.startsWith(u8, s, ";")) {
-//         s = s[1:];
-//         var end = mem.indexOf(u8, s, ";");
-//         if (end == null) {
-//
-//         }
-//         while (end > 0 and (s.count('"', 0, end) - s.count("\\\"", 0, end)) % 2:
-//             end = s.find(";", end + 1)
-//         if end < 0:
-//             end = len(s)
-//         f = s[:end]
-//         yield f.strip()
-//         s = s[end:];
-//     }
-// }
+test "simple-file-form" {
+    const content_type = "multipart/form-data; boundary=1234";
+    const body =
+        "--1234\r\n" ++
+        "Content-Disposition: form-data; name=files; filename=ab.txt\r\n" ++
+        "\r\n" ++
+        "Hello!\n" ++
+        "--1234--\r\n"
+    ;
+    var form = Form.init(std.testing.allocator);
+    defer form.deinit();
+    try form.parseMultipart(content_type, body);
+    const f = form.files.get("files").?;
+    testing.expectEqualStrings(f.filename, "ab.txt");
+    testing.expectEqualStrings(f.body, "Hello!\n");
+}
 
+test "multi-file-form" {
+    const content_type = "multipart/form-data; boundary=1234";
+    const body =
+        "--1234\r\n" ++
+        "Content-Disposition: form-data; name=files; filename=ab.txt\r\n" ++
+        "\r\n" ++
+        "Hello!\n" ++
+        "--1234\r\n" ++
+        "Content-Disposition: form-data; name=files; filename=data.json; content-type=application/json\r\n" ++
+        "\r\n" ++
+        "{\"status\": \"OK\"}\n" ++
+        "--1234--\r\n"
+    ;
+    var form = Form.init(std.testing.allocator);
+    defer form.deinit();
+    try form.parseMultipart(content_type, body);
+    const f = form.files.getArray("files").?;
+    testing.expect(f.items.len == 2);
+    testing.expectEqualStrings(f.items[0].filename, "ab.txt");
+    testing.expectEqualStrings(f.items[0].body, "Hello!\n");
+    testing.expectEqualStrings(f.items[1].filename, "data.json");
+    testing.expectEqualStrings(f.items[1].content_type, "application/json");
+}
 
 
 // Parse a header.
@@ -218,7 +243,6 @@ fn decodeRfc2231Params(allocator: *Allocator, params: *Headers) !void {
 
 test "parse-content-disposition-header" {
     const allocator = std.testing.allocator;
-    //const d = "form-data; foo=\"b\\\\a\\\"r\"; file*=utf-8''T%C3%A4st";
     const d = " form-data; name=\"fieldName\"; filename=\"filename.jpg\"";
     var params = try Headers.initCapacity(allocator, 5);
     defer params.deinit();
@@ -230,7 +254,7 @@ test "parse-content-disposition-header" {
 
 /// Inverse of parseHeader.
 /// This always returns a copy so it must be cleaned up!
-fn encodeHeader(allocator: *Allocator, key: []const u8, params: Headers) ![]const u8 {
+pub fn encodeHeader(allocator: *Allocator, key: []const u8, params: Headers) ![]const u8 {
     if (params.headers.items.len == 0) {
         return try mem.dupe(allocator, u8, key);
     }

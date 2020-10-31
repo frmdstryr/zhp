@@ -151,7 +151,7 @@ pub const ServerConnection = struct {
         self.requestLoop(conn) catch |err| {
             log.err("server error: {}", .{@errorName(err)});
         };
-        log.debug("Closed {}", .{conn});
+        //log.debug("Closed {}", .{conn});
     }
 
     fn requestLoop(self: *ServerConnection, conn: net.StreamServer.Connection) !void {
@@ -804,7 +804,7 @@ pub const Application = struct {
             lock.release();
 
             const conn = try self.server.accept();
-            log.debug("Accepted {}", .{conn});
+            //log.debug("Accepted {}", .{conn});
 
             // Start processing requests
             if (comptime std.io.is_async) {

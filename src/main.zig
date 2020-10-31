@@ -165,7 +165,7 @@ pub fn main() !void {
     var app = web.Application.init(.{
         .allocator=allocator,
         .routes=routes[0..],
-        //.debug=true,
+        .debug=true,
     });
 
     // Logger
