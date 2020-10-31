@@ -5,11 +5,23 @@
 A Http server written in [Zig](https://ziglang.org/).  It uses a zero-copy
 parser and aims to compete with these [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http).
 
-
 See how it compares in the [http benchmarks](https://gist.github.com/kprotty/3f369f46293a421f09190b829cfb48f7#file-newresults-md)
 done by kprotty.
 
 It's a work in progress... feel free to contribute!
+
+
+### Demo
+
+I deployed this at [https://zhp.codelv.com](https://zhp.codelv.com) if you
+want to try it out.
+
+> Note: If you try to benchmark the server it'll ban you, please run it locally
+> or on your own server to do benchmarks.
+
+To make and deploy your own app see:
+- [demo project](https://github.com/frmdstryr/zhp-demo)
+- [zig buildpack](https://github.com/frmdstryr/zig-buildpack)
 
 
 ### Example
