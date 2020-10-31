@@ -22,37 +22,69 @@ const MainHandler = struct {
 
 const StreamHandler = struct {
     handler: web.RequestHandler,
+    const template = @embedFile("templates/stream.html");
 
     // Dump a random stream of crap
     pub fn get(self: *StreamHandler, request: *web.Request,
                response: *web.Response) !void {
-        try response.headers.append("Content-Type", "text/plain");
-        //try response.headers.append("Content-Disposition",
-        //    "attachment; filename=\"stream.txt\"");
-
-        // This will cause the application to send the headers
-        // then invoke the stream function which can send an unlimited
-        // amount of data
-        response.send_stream = true;
+        if (std.mem.eql(u8, request.path, "/stream/live/")) {
+            try response.headers.append("Content-Type", "audio/mpeg");
+            try response.headers.append("Cache-Control", "no-cache");
+            response.send_stream = true;
+        } else {
+            try response.stream.writeAll(template);
+        }
     }
 
     pub fn stream(self: *StreamHandler, io: *web.IOStream) !usize {
-        defer io.close();
-        var total_wrote: usize = 0;
-        var i: usize = 0;
-        var writer = io.writer();
-        while (i < 10) : (i += 1) {
-            // Copy directly to output buffer
+        std.log.info("Starting audio stream", .{});
+        const n = self.forward(io) catch |err| {
+            std.log.info("Error streaming: {}", .{err});
+            return 0;
+        };
+        return n;
+    }
 
-            try writer.print("{}\n", .{"Hello world"});
+    pub fn forward(self: *StreamHandler, io: *web.IOStream) !usize {
+        const writer = io.writer();
+        const a = self.handler.response.allocator;
+        // http://streams.sevenfm.nl/live
+
+        std.log.info("Connecting...", .{});
+        const conn = try std.net.tcpConnectToHost(a, "streams.sevenfm.nl", 80);
+        defer conn.close();
+        std.log.info("Connected!", .{});
+        try conn.writeAll(
+            "GET /live HTTP/1.1\r\n" ++
+            "Host: streams.sevenfm.nl\r\n" ++
+            "Accept: */*\r\n" ++
+            "Connection: keep-alive\r\n" ++
+            "\r\n");
+
+        var buf: [4096]u8 = undefined;
+        var total_sent: usize = 0;
+
+        // On the first response skip their server's headers
+        // but include the icecast stream headers from their response
+        const end = try conn.read(buf[0..]);
+        std.log.info("{}\n", .{buf[0..end]});
+
+        const offset = if (std.mem.indexOf(u8, buf[0..end], "icy-br:")) |o| o else 0;
+        try writer.writeAll(buf[offset..end]);
+        total_sent += end-offset;
+
+        // Now just forward the stream data
+        while (true) {
+            const n = try conn.read(buf[0..]);
+            if (n == 0) {
+                std.log.info("Stream disconnected", .{});
+                break;
+            }
+            total_sent += n;
+            try writer.writeAll(buf[0..n]);
             try io.flush(); // Send it out the pipe
-            //total_wrote += io.out_buffer.len;
-
-            // Simulate doing something...
-            // TODO: Non blocking?
-            std.time.sleep(1*std.time.ns_per_s);
         }
-        return total_wrote;
+        return total_sent;
     }
 
 };
@@ -157,6 +189,7 @@ pub fn main() !void {
         web.Route.create("hello", "/hello", MainHandler),
         web.Route.create("json", "/json/", JsonHandler),
         web.Route.create("stream", "/stream/", StreamHandler),
+        web.Route.create("stream-media", "/stream/live/", StreamHandler),
         web.Route.create("error", "/500/", ErrorTestHandler),
         web.Route.create("form", "/form/", FormHandler),
         web.Route.static("static", "/static/"),
@@ -170,7 +203,9 @@ pub fn main() !void {
 
     // Logger
     var logger = zhp.middleware.LoggingMiddleware{};
-    //try app.middleware.append(&logger.middleware);
+
+    // Uncomment this if benchmarking
+    try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);

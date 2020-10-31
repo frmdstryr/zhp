@@ -789,6 +789,14 @@ pub const Application = struct {
     pub fn start(self: *Application) !void {
         try self.mimetypes.load();
 
+        // Ignore sigpipe
+        var act = std.os.Sigaction{
+            .sigaction = os.SIG_IGN,
+            .mask = os.empty_sigset,
+            .flags = 0,
+        };
+        os.sigaction(os.SIGPIPE, &act, null);
+
         Application.instance = self;
         while (true) {
             // Grab a frame
