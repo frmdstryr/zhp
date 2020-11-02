@@ -12,15 +12,7 @@ before_install:
 
 script:
     # Test individual files
-    - zig test -OReleaseSafe lib/zhp/status.zig
-    - zig test -OReleaseSafe lib/zhp/headers.zig
-    - zig test -OReleaseSafe lib/zhp/middleware.zig
-    - zig test -OReleaseSafe lib/zhp/mimetypes.zig
-    - zig test -OReleaseSafe lib/zhp/time/datetime.zig
-    - zig test -OReleaseSafe lib/zhp/util.zig
-    - zig test -OReleaseSafe lib/zhp/request.zig
-    - zig test -OReleaseSafe lib/zhp/response.zig
-    - zig test -OReleaseSafe lib/zhp/forms.zig
+    - zig test -OReleaseSafe lib/zhp/app.zig
 
 
     # Make sure this repo builds

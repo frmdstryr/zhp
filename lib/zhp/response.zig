@@ -6,14 +6,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const responses = @import("status.zig");
-const Status = @import("status.zig").Status;
-const Headers = @import("headers.zig").Headers;
-const Request = @import("request.zig").Request;
-const web = @import("web.zig");
-const IOStream = @import("util.zig").IOStream;
+const web = @import("zhp.zig");
+const responses = web.responses;
+const Status = responses.Status;
+const Headers = web.Headers;
+const Request = web.Request;
+const IOStream = web.IOStream;
 
-pub const Bytes = std.ArrayList(u8);
+const Bytes = std.ArrayList(u8);
 
 
 pub const Response = struct {
@@ -79,7 +79,7 @@ pub const Response = struct {
 
 
 test "response" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     var response = try Response.initCapacity(allocator, 4096, 1096);
     response.prepare();
     defer response.deinit();
@@ -87,8 +87,10 @@ test "response" {
     std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.items);
 
     _ = try response.stream.print("{}\n", .{"Testing!"});
-    std.debug.warn("'{}'\n", .{response.body.items});
     std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.items);
-
     try response.headers.put("Content-Type", "Keep-Alive");
+}
+
+test "response-fns" {
+    std.testing.refAllDecls(Response);
 }

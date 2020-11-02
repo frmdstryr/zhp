@@ -5,7 +5,7 @@ const std = @import("std");
 const net = std.net;
 const fs = std.fs;
 const os = std.os;
-const web = @import("zhp").web;
+const web = @import("zhp");
 
 pub const io_mode = .evented;
 
@@ -43,7 +43,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
     while (true) {
         cnt += 1;
         defer request.reset();
-        var n = request.parse(&stream) catch |err| switch (err) {
+        var n = request.parse(&stream, .{}) catch |err| switch (err) {
             error.EndOfStream, error.BrokenPipe,
             error.ConnectionResetByPeer => break,
             else => return err,

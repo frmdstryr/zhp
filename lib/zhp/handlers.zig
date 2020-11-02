@@ -7,12 +7,11 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 const log = std.log;
-const web = @import("web.zig");
-const responses = @import("status.zig");
-const Datetime = @import("time/datetime.zig").Datetime;
+const web = @import("zhp.zig");
+const responses = web.responses;
+const Datetime = web.datetime.Datetime;
 
 pub var default_stylesheet = @embedFile("templates/style.css");
-
 
 
 pub const ServerErrorHandler = struct {

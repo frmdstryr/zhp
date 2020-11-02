@@ -4,8 +4,7 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const zhp = @import("zhp");
-const web = zhp.web;
+const web = @import("zhp");
 
 pub const io_mode = .evented;
 
@@ -67,8 +66,6 @@ const StreamHandler = struct {
         // On the first response skip their server's headers
         // but include the icecast stream headers from their response
         const end = try conn.read(buf[0..]);
-        std.log.info("{}\n", .{buf[0..end]});
-
         const offset = if (std.mem.indexOf(u8, buf[0..end], "icy-br:")) |o| o else 0;
         try writer.writeAll(buf[offset..end]);
         total_sent += end-offset;
@@ -134,28 +131,41 @@ const ErrorTestHandler = struct {
 
 const FormHandler = struct {
     handler: web.RequestHandler,
+    const template = @embedFile("templates/form.html");
+    const key = "{% form %}";
+    const start = std.mem.indexOf(u8, template, key).?;
+    const end = start + key.len;
 
-    pub fn get(self: *FormHandler, request: *web.Request,
-               response: *web.Response) !void {
-        try response.stream.writeAll(
-            \\<form action="/form/" method="post" enctype="multipart/form-data">
+    pub fn get(self: *FormHandler, request: *web.Request, response: *web.Response) !void {
+        // Split the template on the key
+
+        const form =
+        \\<form action="/form/" method="post" enctype="multipart/form-data">
             \\<input type="text" name="name" value="Your name"><br />
             \\<input type="checkbox" name="agree" /><label>Do you like Zig?</label><br />
             \\<input type="file" name="image" /><label>Upload</label><br />
             \\<button type="submit">Submit</button>
-            \\</form>
-        );
+        \\</form>
+        ;
+        try response.stream.writeAll(template[0..start]);
+        try response.stream.writeAll(form);
+        try response.stream.writeAll(template[end..]);
     }
 
     pub fn post(self: *FormHandler, request: *web.Request,
                response: *web.Response) !void {
-        var content_type = request.headers.get("Content-Type") catch |err| switch (err) {
-            error.KeyError => "",
-            else => return err,
-        };
+        var content_type = request.headers.getDefault("Content-Type", "");
         if (std.mem.startsWith(u8, content_type, "multipart/form-data")) {
             var form = web.forms.Form.init(response.allocator);
-            try form.parse(request);
+            form.parse(request) catch |err| switch (err) {
+                error.NotImplemented => {
+                    response.status = web.responses.REQUEST_ENTITY_TOO_LARGE;
+                    return;
+                },
+                else => return err,
+            };
+            try response.stream.writeAll(template[0..start]);
+
             try response.stream.print(
                 \\<h1>Hello: {}</h1>
                 , .{if (form.fields.get("name")) |name| name else ""}
@@ -166,14 +176,9 @@ const FormHandler = struct {
             } else {
                 try response.stream.writeAll("Aww sorry!");
             }
-
-            try response.stream.print(
-                \\<h1>Request: {}</h1>
-                , .{request.body});
+            try response.stream.writeAll(template[end..]);
         } else {
             response.status = web.responses.BAD_REQUEST;
-            try response.stream.writeAll("<h1>BAD REQUEST</h1>");
-            return;
         }
     }
 };
@@ -202,7 +207,7 @@ pub fn main() !void {
     });
 
     // Logger
-    var logger = zhp.middleware.LoggingMiddleware{};
+    var logger = web.middleware.LoggingMiddleware{};
 
     // Uncomment this if benchmarking
     try app.middleware.append(&logger.middleware);

@@ -12,6 +12,7 @@ const Address = std.net.Address;
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const AtomicFile = std.fs.AtomicFile;
 const Headers = @import("headers.zig").Headers;
 
 const util = @import("util.zig");
@@ -21,6 +22,24 @@ const IOStream = util.IOStream;
 
 
 pub const Request = struct {
+    pub const Content = struct {
+        pub const StorageType = enum {
+            Buffer,
+            TempFile,
+        };
+        type: StorageType,
+        data: union {
+            buffer: []const u8,
+            file: AtomicFile,
+        },
+    };
+
+    pub const ParseOptions = struct {
+        max_request_line_size: usize = 2048,
+        max_header_size: usize = 10*1024,
+        max_content_length: usize = 1000*1024*1024,
+    };
+
     pub const Method = enum {
         Get,
         Put,
@@ -71,8 +90,8 @@ pub const Request = struct {
     // All headers
     headers: Headers,
 
-    // Body of request
-    body: []const u8 = "",
+    // Body of request will be one of these depending on the size
+    content: ?Content = null,
 
     // Client address
     client: Address,
@@ -90,6 +109,8 @@ pub const Request = struct {
 
     // Slice from the start to the body
     head: []const u8 = "",
+
+    stream: ?*IOStream = null,
 
     // ------------------------------------------------------------------------
     // Constructors
@@ -118,10 +139,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Parsing
     // ------------------------------------------------------------------------
-
-    // Parse using default sizes
-    // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
-    pub fn parse(self: *Request, stream: *IOStream) !usize {
+    pub fn parse(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
         self.buffer.expandToCapacity();
@@ -130,20 +148,24 @@ pub const Request = struct {
         // TODO: This should retry if the error is EndOfBuffer which means
         // it got a partial request
         try stream.fillBuffer();
-        return self.parseNoSwap(stream);
+        return self.parseNoSwap(stream, options);
     }
 
-    inline fn parseNoSwap(self: *Request, stream: *IOStream) !usize {
+    inline fn parseTest(self: *Request, stream: *IOStream) !usize {
+        return self.parseNoSwap(stream, .{});
+    }
+
+    inline fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
         const start = stream.readCount();
 
         // FIXME make these configurable
-        try self.parseRequestLine(stream, 2048);
-        try self.parseHeaders(stream, 32*1024);
-        try self.parseContentLength(100*1024*1024);
+        try self.parseRequestLine(stream, options.max_request_line_size);
+        try self.parseHeaders(stream, options.max_header_size);
+        try self.parseContentLength(options.max_content_length);
 
         const end = stream.readCount();
         self.head = self.buffer.items[start..end];
-        return self.head.len;
+        return end;
     }
 
     // Based on picohttpparser
@@ -175,7 +197,7 @@ pub const Request = struct {
             'G' => { // GET
                 inline for("ET") |expected| {
                     ch = try stream.readByteFast();
-                    if (ch != expected) return error.BadRequest;
+                    if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Get;
             },
@@ -184,44 +206,44 @@ pub const Request = struct {
                 switch (ch) {
                     'U' => {
                         ch = try stream.readByteFast();
-                        if (ch != 'T') return error.BadRequest;
+                        if (ch != 'T') return error.MethodNotAllowed;
                         self.method = Method.Put;
                     },
                     'O' => {
                         inline for("ST") |expected| {
                             ch = try stream.readByteFast();
-                            if (ch != expected) return error.BadRequest;
+                            if (ch != expected) return error.MethodNotAllowed;
                         }
                         self.method = Method.Post;
                     },
                     'A' => {
                         inline for("TCH") |expected| {
                             ch = try stream.readByteFast();
-                            if (ch != expected) return error.BadRequest;
+                            if (ch != expected) return error.MethodNotAllowed;
                         }
                         self.method = Method.Patch;
                     },
-                    else => return error.BadRequest,
+                    else => return error.MethodNotAllowed,
                 }
             },
             'H' => {
                 inline for("EAD") |expected| {
                     ch = try stream.readByteFast();
-                    if (ch != expected) return error.BadRequest;
+                    if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Head;
             },
             'D' => {
                 inline for("ELETE") |expected| {
                     ch = try stream.readByteFast();
-                    if (ch != expected) return error.BadRequest;
+                    if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Delete;
             },
             'O' => {
                 inline for("PTIONS") |expected| {
                     ch = try stream.readByteFast();
-                    if (ch != expected) return error.BadRequest;
+                    if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Options;
 
@@ -294,6 +316,7 @@ pub const Request = struct {
                     ch = try stream.readByteFast();
                     if (!ascii.isAlNum(ch) and ch != '.' and ch != '-') break;
                 }
+                if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
 
                 if (ch == ':') {
                     // Read port, can be at most 5 digits (65535) so we
@@ -354,40 +377,119 @@ pub const Request = struct {
     }
 
     pub inline fn parseContentLength(self: *Request, max_size: usize) !void {
-        var headers = &self.headers;
+        const headers = &self.headers;
         // Read content length
-        if (!headers.contains("Content-Length")) {
-            self.content_length = 0;
-            return;
-        }
+        const header: ?[]const u8 = headers.get("Content-Length") catch null;
+        if (header) |content_length| {
+            if (headers.contains("Transfer-Encoding")) {
+                // Response cannot contain both Content-Length and
+                // Transfer-Encoding headers.
+                // http://tools.ietf.org/html/rfc7230#section-3.3.3
+                return error.BadRequest;
+            }
 
-        if (headers.contains("Transfer-Encoding")) {
-            // Response cannot contain both Content-Length and
-            // Transfer-Encoding headers.
-            // http://tools.ietf.org/html/rfc7230#section-3.3.3
-            return error.BadRequest;
-        }
-        var content_length_header = try headers.get("Content-Length");
+            // Proxies sometimes cause Content-Length headers to get
+            // duplicated.  If all the values are identical then we can
+            // use them but if they differ it's an error.
+            var it = mem.split(content_length, ",");
+            if (it.next()) |piece| {
+                try headers.put("Content-Length", piece);
+            }
 
-        // Proxies sometimes cause Content-Length headers to get
-        // duplicated.  If all the values are identical then we can
-        // use them but if they differ it's an error.
-        var it = mem.split(content_length_header, ",");
-        if (it.next()) |piece| {
-            try headers.put("Content-Length", piece);
-        }
+            self.content_length = std.fmt.parseInt(u32, content_length, 10)
+                catch return error.BadRequest;
 
-        self.content_length = std.fmt.parseInt(u32, content_length_header, 10)
-            catch return error.BadRequest;
-
-        if (self.content_length > max_size) {
-            return error.RequestEntityTooLarge;
-        }
+            if (self.content_length > max_size) {
+                return error.RequestEntityTooLarge;
+            }
+        } // Should already be 0
     }
 
     //pub fn parseCookie(self: *Request) !void {
     //    // TODO Do while parsing headers
     //}
+
+    pub fn readBody(self: *Request, stream: *IOStream) !void {
+        defer {
+            // Once the read finishes we no longer want to be able to access
+            // the stream (as that should be done with other requests)
+            self.read_finished = true;
+            self.stream = null;
+        }
+        if (self.content_length > 0) {
+            try self.readFixedBody(stream);
+        } else if (self.headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
+            try self.readChunkedBody(stream);
+        }
+    }
+
+    pub fn readFixedBody(self: *Request, stream: *IOStream) !void {
+        // End of the request
+        const end_of_request = self.head.len;
+
+        // Anything else is the body
+        const end_of_body = self.content_length + end_of_request;
+
+
+        // Take whatever is still buffered from the initial read
+        const amt = stream.consumeBuffered(self.content_length);
+
+        if (end_of_body > self.buffer.capacity) {
+            std.log.warn("Write to temp file", .{});
+            // TODO: Write the body to a file
+            const tmp = std.fs.cwd();//.openDir("/tmp/");
+            var f = try tmp.atomicFile("zhp.tmp", .{});
+
+            // Copy what was buffered
+            const start = end_of_request + amt;
+            var writer = f.file.writer();
+            try writer.writeAll(self.buffer.items[end_of_request..start]);
+
+            // Switch the stream to unbuffered mode and read directly
+            // into the request buffer
+            stream.readUnbuffered(true);
+            defer stream.readUnbuffered(false);
+
+            var reader = stream.reader();
+            var left: usize = end_of_body - start;
+            while (left > 0) {
+                var buf: [4096]u8 = undefined;
+                const end = std.math.min(left, buf.len);
+                const n = try reader.read(buf[0..end]);
+                if (n == 0) break;
+                try writer.writeAll(buf[0..n]);
+                left -= n;
+            }
+
+            self.content = Content{
+                .type = .TempFile,
+                .data = .{.file=f},
+            };
+        } else {
+            std.log.warn("Buffer", .{});
+            // We can fit it in memory
+            const body = self.buffer.items[end_of_request..end_of_body];
+
+            if (amt < self.content_length) {
+                // We need to read more
+                var buf = body[amt..];
+
+                // Switch the stream to unbuffered mode and read directly
+                // into the request buffer
+                stream.readUnbuffered(true);
+                defer stream.readUnbuffered(false);
+                try stream.reader().readNoEof(buf);
+            }
+            self.content = Content{
+                .type = .Buffer,
+                .data = .{.buffer=body},
+            };
+        }
+    }
+
+    pub fn readChunkedBody(self: *Request, stream: *IOStream) !void {
+        return error.NotImplemented; // TODO: This
+    }
 
 
     pub fn format(
@@ -396,13 +498,28 @@ pub const Request = struct {
         options: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
-        try std.fmt.format(out_stream, "Request{{", .{});
-        try std.fmt.format(out_stream, ".client={}, ", .{self.client});
-        try std.fmt.format(out_stream, ".method={}, ", .{self.method});
-        try std.fmt.format(out_stream, ".version={}, ", .{self.version});
-        try std.fmt.format(out_stream, ".scheme={}, ", .{self.scheme});
-        try std.fmt.format(out_stream, ".uri={}, ", .{self.uri});
-        try std.fmt.format(out_stream, ".headers={}, ", .{self.headers});
+        try std.fmt.format(out_stream, "Request{{\n", .{});
+        try std.fmt.format(out_stream, "  .client={},\n", .{self.client});
+        try std.fmt.format(out_stream, "  .method={},\n", .{self.method});
+        try std.fmt.format(out_stream, "  .version={},\n", .{self.version});
+        try std.fmt.format(out_stream, "  .scheme={},\n", .{self.scheme});
+        try std.fmt.format(out_stream, "  .uri={},\n", .{self.uri});
+        try std.fmt.format(out_stream, "  .headers={},\n", .{self.headers});
+        if (self.content) |content| {
+            const n = std.math.min(self.content_length, 1024);
+            switch (content.type) {
+                .TempFile => {
+//                     content.data.file
+//                     try std.fmt.format(out_stream, "   .body='{}',\n", .{
+//                         content.data.file[0..n]});
+                },
+                .Buffer => {
+                    try std.fmt.format(out_stream, "   .body='{}',\n", .{
+                        content.data.buffer[0..n]});
+                }
+            }
+
+        }
         try std.fmt.format(out_stream, "}}", .{});
     }
 
@@ -419,19 +536,33 @@ pub const Request = struct {
         self.uri = "";
         self.query = "";
         self.head = "";
-        self.body = "";
 
+        self.cleanup();
 
         self.version = .Unknown;
         self.content_length = 0;
         self.read_finished = false;
         self.headers.reset();
         self.buffer.items.len = 0;
+        self.stream = null;
+    }
+
+    pub fn cleanup(self: *Request) void {
+        if (self.content) |*content| {
+            switch (content.type) {
+                .TempFile => {
+                    content.data.file.deinit();
+                },
+                .Buffer => {}
+            }
+            self.content = null;
+        }
     }
 
     pub fn deinit(self: *Request) void {
         self.buffer.deinit();
         self.headers.deinit();
+        self.cleanup();
     }
 
 };
@@ -486,7 +617,7 @@ test "01-parse-request-line" {
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
     stream.startTest();
-    _ = try request.parseNoSwap(&stream);
+    _ = try request.parseTest(&stream);
 
     testing.expectEqual(request.method, Request.Method.Get);
     testing.expectEqual(request.version, Request.Version.Http1_1);
@@ -496,7 +627,7 @@ test "01-parse-request-line" {
     stream = try IOStream.initTest(allocator, TEST_GET_2);
     request = try Request.initTest(allocator, &stream);
     stream.startTest();
-    _ = try request.parseNoSwap(&stream);
+    _ = try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Get);
     testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
@@ -508,7 +639,7 @@ test "01-parse-request-line" {
     stream = try IOStream.initTest(allocator, TEST_POST_1);
     request = try Request.initTest(allocator, &stream);
     stream.startTest();
-    _ = try request.parseNoSwap(&stream);
+    _ = try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Post);
     testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
@@ -528,12 +659,12 @@ test "02-parse-request-multiple" {
     var request = try Request.initTest(allocator, &stream);
     stream.startTest();
 
-    var n = try request.parseNoSwap(&stream);
+    var n = try request.parseTest(&stream);
     testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
-    n = try request.parseNoSwap(&stream);
+    n = try request.parseTest(&stream);
     testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
-    n = try request.parseNoSwap(&stream);
+    n = try request.parseTest(&stream);
     // I have no idea why but this seems to mess up the speed of the next test
     //testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
 
@@ -607,7 +738,7 @@ test "04-parse-request-headers" {
     );
     var request = try Request.initTest(allocator, &stream);
     stream.startTest();
-    _ = try request.parseNoSwap(&stream);
+    _ = try request.parseTest(&stream);
     var h = &request.headers;
 
     testing.expectEqual(@as(usize, 6), h.headers.items.len);
@@ -628,7 +759,7 @@ test "04-parse-request-headers" {
     // Next
     try stream.load(allocator, TEST_GET_1);
     request = try Request.initTest(allocator, &stream);
-    _ = try request.parseNoSwap(&stream);
+    _ = try request.parseTest(&stream);
     h = &request.headers;
 
     testing.expectEqual(@as(usize, 9), h.headers.items.len);
@@ -674,7 +805,7 @@ test "05-bench-parse-request-headers" {
         request.buffer.items.len = TEST_GET_1.len;
 
         //     1031k req/s 725MB/s (969 ns/req)
-        n = try request.parseNoSwap(&stream);
+        n = try request.parseTest(&stream);
         request.reset();
         fba.reset();
         stream.reset();

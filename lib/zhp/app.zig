@@ -4,43 +4,220 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const net = std.net;
-const fs = std.fs;
 const os = std.os;
 const mem = std.mem;
-const math = std.math;
-const ascii = std.ascii;
-const time = std.time;
-const meta = std.meta;
-const testing = std.testing;
-const assert = std.debug.assert;
 const log = std.log;
+const net = std.net;
+const time = std.time;
+const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 
-pub const responses = @import("status.zig");
-const handlers = @import("handlers.zig");
-const Datetime = @import("time/datetime.zig").Datetime;
-const mimetypes = @import("mimetypes.zig");
-pub const forms = @import("forms.zig");
+const web = @import("zhp.zig");
+const util = @import("util.zig");
 
-pub const util = @import("util.zig");
-pub const IOStream = util.IOStream;
+const Datetime = web.datetime.Datetime;
+const mimetypes = web.mimetypes;
+const Request = web.Request;
+const Response = web.Response;
+const IOStream = util.IOStream;
+const Middleware = web.middleware.Middleware;
+const handlers = web.handlers;
 
-pub const Headers = @import("headers.zig").Headers;
-pub const Status = responses.Status;
-pub const Request = @import("request.zig").Request;
-pub const Response = @import("response.zig").Response;
-pub const Middleware = @import("middleware.zig").Middleware;
+
+pub const RequestHandler = struct {
+    const STACK_SIZE = 100*1024;
+
+    // Request handler signature
+    const HandlerFn = if (std.io.is_async)
+            fn(self: *RequestHandler) callconv(.Async) anyerror!void
+        else
+            fn(self: *RequestHandler) anyerror!void;
+    const StreamFn = if (std.io.is_async)
+            fn(self: *RequestHandler, io: *IOStream) callconv(.Async) anyerror!usize
+        else
+            fn(self: *RequestHandler, io: *IOStream) anyerror!usize;
+
+    application: *Application,
+    request: *Request,
+    response: *Response,
+    err: ?anyerror = null,
+
+    // Generic dispatch to handle
+    dispatch: HandlerFn = defaultDispatch,
+
+    // Default handlers
+    head: HandlerFn = defaultHandler,
+    get: HandlerFn = defaultHandler,
+    post: HandlerFn = defaultHandler,
+    delete: HandlerFn = defaultHandler,
+    patch: HandlerFn = defaultHandler,
+    put: HandlerFn = defaultHandler,
+    options: HandlerFn = defaultHandler,
+
+    // Write stream
+    stream: ?StreamFn = null,
+
+    // Read stream
+    upload: ?StreamFn = null,
+
+    // Execute the request handler by running the dispatch function
+    // By default the dispatch function calls the method matching
+    // the request method
+    pub fn execute(self: *RequestHandler) !void {
+        if (std.io.is_async) {
+            var stack_frame: [STACK_SIZE * 2]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, self.dispatch, .{self});
+        } else {
+            try self.dispatch(self);
+        }
+    }
+
+    // Dispatches to the other handlers based on the parsed request method
+    // This can be replaced with a custom handler if necessary
+    pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
+        const handler: HandlerFn = switch (self.request.method) {
+            .Get => self.get,
+            .Put => self.put,
+            .Post => self.post,
+            .Patch => self.patch,
+            .Head => self.head,
+            .Delete => self.delete,
+            .Options => self.options,
+            else => RequestHandler.defaultHandler,
+        };
+        if (std.io.is_async) {
+            // Give a good chunk to the handler
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, handler, .{self});
+        } else {
+            return handler(self);
+        }
+    }
+
+    // Default handler request implementation
+    pub fn defaultHandler(self: *RequestHandler) anyerror!void {
+        self.response.status = web.responses.METHOD_NOT_ALLOWED;
+        return error.HttpError;
+    }
+
+    pub fn startStreaming(self: *RequestHandler, io: *IOStream) !usize {
+        if (self.stream) |stream_fn| {
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, stream_fn, .{self, io});
+        }
+        return error.ServerError; // Downlink stream handler not defined
+    }
+
+    pub fn startUpload(self: *RequestHandler, io: *IOStream) !void {
+        if (self.upload) |upload_fn| {
+            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
+            return await @asyncCall(&stack_frame, {}, upload_fn, .{self, io});
+        }
+        return error.ServerError; // Uplink stream handler not defined
+    }
+
+    pub fn deinit(self: *RequestHandler) void {
+        // The handler is created in a fixed buffer so we don't have
+        // to free anything here (for now)
+    }
+
+};
+
+// A handler is simply a a factory function which returns a RequestHandler
+pub const Handler = fn(app: *Application, request: *Request, response: *Response) anyerror!*RequestHandler;
+
+
+// A utility function so the user doesn't have to use @fieldParentPtr all the time
+// This seems a bit excessive...
+pub fn createHandler(comptime T: type) Handler {
+    const RequestDispatcher = struct {
+        const Self  = @This();
+
+        pub fn create(app: *Application, request: *Request, response: *Response) !*RequestHandler {
+            comptime const defaultDispatch = RequestHandler.defaultDispatch;
+            comptime const defaultHandler = RequestHandler.defaultHandler;
+            const self = try response.allocator.create(T);
+            self.* = T{
+                .handler = RequestHandler{
+                    .application = app,
+                    .request = request,
+                    .response = response,
+                    .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
+                    .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
+                    .get = if (@hasDecl(T, "get")) Self.get else defaultHandler,
+                    .post = if (@hasDecl(T, "post")) Self.post else defaultHandler,
+                    .delete = if (@hasDecl(T, "delete")) Self.delete else defaultHandler,
+                    .patch = if (@hasDecl(T, "patch")) Self.patch else defaultHandler,
+                    .put = if (@hasDecl(T, "put")) Self.put else defaultHandler,
+                    .options = if (@hasDecl(T, "options")) Self.options else defaultHandler,
+                    .stream = if (@hasDecl(T, "stream")) Self.stream else null,
+                },
+            };
+            return &self.handler;
+        }
+
+        pub fn dispatch(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.dispatch(req.request, req.response);
+        }
+
+        pub fn head(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.head(req.request, req.response);
+        }
+
+        pub fn get(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.get(req.request, req.response);
+        }
+
+        pub fn post(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.post(req.request, req.response);
+        }
+
+        pub fn delete(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.delete(req.request, req.response);
+        }
+
+        pub fn patch(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.patch(req.request, req.response);
+        }
+
+        pub fn put(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.put(req.request, req.response);
+        }
+
+        pub fn options(req: *RequestHandler) !void {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.options(req.request, req.response);
+        }
+
+        pub fn stream(req: *RequestHandler, io: *IOStream) !usize {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.stream(io);
+        }
+
+        pub fn upload(req: *RequestHandler, io: *IOStream) !usize {
+            const handler = @fieldParentPtr(T, "handler", req);
+            return handler.upload(io);
+        }
+    };
+
+    return RequestDispatcher.create;
+}
 
 
 pub const ServerRequest = struct {
     const STACK_SIZE = 10*1024;
     allocator: *Allocator,
     application: *Application,
-    //stack_frame: []align(std.Target.stack_align) u8 = undefined,
 
     // Storage the fixed buffer allocator used for each request handler
     storage: []u8 = undefined,
@@ -56,7 +233,6 @@ pub const ServerRequest = struct {
         return ServerRequest{
             .allocator = allocator,
             .application = application,
-            //.stack_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, 1024),
             .storage = try allocator.alloc(
                 u8, application.options.handler_buffer_size),
             .request = try Request.initCapacity(
@@ -89,7 +265,7 @@ pub const ServerRequest = struct {
             return await @asyncCall(&stack_frame, {}, factoryFn,
                 .{self.application, request, response});
         } else {
-            return factoryFn(self.application, response, response);
+            return factoryFn(self.application, request, response);
         }
     }
 
@@ -166,21 +342,28 @@ pub const ServerConnection = struct {
         // Grab a request
         // at some point this should be moved into the loop to handle
         // pipelining but it currently makes it slower
-        const lock = app.request_pool.lock.acquire();
-            var server_request: *ServerRequest = undefined;
+        var server_request: *ServerRequest = undefined;
+        {
+            const lock = app.request_pool.lock.acquire();
+            defer lock.release();
+
             if (app.request_pool.get()) |c| {
                 server_request = c;
             } else {
                 server_request = try app.request_pool.create();
-                server_request.* = try ServerRequest.init(
-                    app.allocator, app);
+                server_request.* = try ServerRequest.init(app.allocator, app);
                 server_request.prepare();
             }
-        lock.release();
+        }
         defer server_request.release();
 
         const request = &server_request.request;
         const response = &server_request.response;
+        const options = Request.ParseOptions{
+            .max_request_line_size = params.max_request_line_size,
+            .max_header_size = params.max_request_headers_size,
+            .max_content_length = params.max_content_length,
+        };
 
         request.client = conn.address;
 
@@ -193,52 +376,65 @@ pub const ServerConnection = struct {
             };
 
             // Parse the request line and headers
-            _ = request.parse(&self.io) catch |err| {
+            request.stream = &self.io;
+            const n = request.parse(&self.io, options) catch |err| blk: {
                 server_request.err = err;
+                break :blk self.io.readCount();
             };
 
-            // If no error occurred read the body
-            if (server_request.err == null) {
-                self.readBody(request, response) catch |err| {
-                    server_request.err = err;
-                };
-            }
+            // Get the function used to build the handler for the request
+            // if this is null it means that handler should not be used
+            // as one of the middleware handlers took care of it
+            const factoryFn = try app.processRequest(self, request, response);
 
-            // Body read ok, now read the request
-            if (server_request.err == null) {
-                // Get the handler
-                const factoryFn = try app.processRequest(self, request, response);
+            // If we got a handler read the body and run it
+            if (server_request.err == null and factoryFn != null) {
+                const factory = factoryFn.?;
+                self.handler = try server_request.buildHandler(
+                    factory, request, response);
 
-                // At this point all reads on the request are done
-                // this could be spawn off into an async response for http/2
-                if (factoryFn) |factory| {
-                    self.handler = try server_request.buildHandler(
-                        factory, request, response);
+                const handler = self.handler.?;
 
-                    const handler = self.handler.?;
+                // Check if we got an error while reading the body
+                if (server_request.err == null) {
                     handler.execute() catch |err| {
                         server_request.err = err;
                     };
                 }
             }
 
+            // If the request handler didn't read the body, do it now
+            if (!request.read_finished) {
+                request.readBody(&self.io) catch |err| {
+                    if (server_request.err == null) {
+                        server_request.err = err;
+                    }
+                };
+            }
+
             // If an error ocurred during parsing or running the handler
             // invoke the error handler
             if (server_request.err) |err| {
-                log.debug("Handling error: {}", .{err});
+                if (self.application.options.debug) {
+                    log.warn("server error: {} {}", .{err, request});
+                } else {
+                    log.warn("server error: {} {}", .{err, self.address});
+                }
                 self.handler = try server_request.buildHandler(
                     app.error_handler, request, response);
-                const handler = self.handler.?;
-                handler.err = err;
-                try handler.execute();
+                const err_handler = self.handler.?;
+                err_handler.err = err;
+                try err_handler.execute();
+
                 switch (err) {
-                    error.EndOfStream, error.ConnectionResetByPeer => {
+                    error.BrokenPipe, error.EndOfStream, error.ConnectionResetByPeer => {
                         self.io.closed = true; // Make sure no response is sent
                     },
-                    else=>{},
+                    else => {},
                 }
             }
 
+            // Let middleware process the response
             try app.processResponse(self, request, response);
 
             // Request handler already sent the response
@@ -265,82 +461,21 @@ pub const ServerConnection = struct {
         return false;
     }
 
-    fn readBody(self: *ServerConnection, request: *Request,
-                response: *Response) !void {
-        const params = &self.application.options;
-        const content_length = request.content_length;
-        const headers = &request.headers;
-        const code = response.status.code;
-
-        if (headers.eqlIgnoreCase("Expect", "100-continue")) {
-            response.status = responses.CONTINUE;
-        }
-
-        if (code == 204) {
-            // This response code is not allowed to have a non-empty body,
-            // and has an implicit length of zero instead of read-until-close.
-            // http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.3
-            if (headers.contains("Transfer-Encoding") or !(content_length == 0)) {
-                //log.warn(
-                //    "Response with code {} should not have a body", .{code});
-                return error.BadRequest;
-            }
-            return;
-        }
-
-        // FIXME: There needs to be some limit here
-        if (content_length > params.max_body_size) {
-            return error.RequestEntityTooLarge;
-        } else if (content_length > 0) {
-            try self.readFixedBody(request);
-        }
-        //} else if (headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
-        //    try self.readChunkedBody(request);
-        //}
-        request.read_finished = true;
-    }
-
-    fn readFixedBody(self: *ServerConnection, request: *Request) !void {
-        const params = &self.application.options;
-        const stream = &self.io.reader();
-
-        // End of the request
-        const end_of_request = request.head.len;
-
-        // Anything else is the body
-        const end_of_body = request.content_length + end_of_request;
-        const end = std.math.min(request.buffer.capacity, end_of_body);
-        const body = request.buffer.items[end_of_request..end];
-
-        // Take whatever is still buffered
-        const amt = self.io.consumeBuffered(request.content_length);
-
-        if (amt < request.content_length) {
-            // We need to read more
-            var buf = body[amt..];
-
-            // Switch the stream to unbuffered mode and read directly to the request
-            // buffer
-            // TODO: Should do read in chunks
-            self.io.readUnbuffered(true);
-            defer self.io.readUnbuffered(false);
-            try stream.readNoEof(buf);
-
-            if (end != end_of_body) {
-                // FIXME: Need to spool to file
-                return error.RequestTooLarge;
-            }
-
-        } // otherwise the body is already in the request buffer
-
-        request.body = body;
-        return;
-    }
-
     // Write the request
     pub fn sendResponse(self: *ServerConnection, request: *Request,
                         response: *Response) !void {
         const stream = &self.io.writer();
+        const content_length = response.body.items.len;
+
+        if (response.status.code == 204) {
+            // This response code is not allowed to have a non-empty body,
+            // and has an implicit length of zero instead of read-until-close.
+            // http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.3
+            if (content_length != 0 or response.headers.contains("Transfer-Encoding")) {
+                log.warn("Response with code 204 should not have a body", .{});
+                return error.ServerError;
+            }
+        }
 
         // Finalize any headers
         if (request.version == .Http1_1 and response.disconnect_on_finish) {
@@ -367,16 +502,16 @@ pub const ServerConnection = struct {
 
         // Set default content type
         if (!response.headers.contains("Content-Type")) {
-            _= try stream.write("Content-Type: text/html\r\n");
+            _ = try stream.write("Content-Type: text/html\r\n");
         }
 
         // Send content length if missing otherwise the client hangs reading
         if (!response.send_stream and !response.headers.contains("Content-Length")) {
-            try stream.print("Content-Length: {}\r\n", .{response.body.items.len});
+            try stream.print("Content-Length: {}\r\n", .{content_length});
         }
 
         // End of headers
-        _= try stream.write("\r\n");
+        _ = try stream.write("\r\n");
 
         // Write body
 //         if (response.chunking_output) {
@@ -387,8 +522,6 @@ pub const ServerConnection = struct {
 //         }
         var total_wrote: usize = 0;
         if (response.send_stream) {
-            // Empty the output buffer
-            try self.io.flush();
             if (self.handler) |handler| {
                 total_wrote += try handler.startStreaming(&self.io);
             } else {
@@ -404,10 +537,10 @@ pub const ServerConnection = struct {
 
         // Make sure the content-length was correct otherwise the client
         // will hang waiting
-        if (!response.send_stream and total_wrote != response.body.items.len) {
-            log.warn("Invalid content-length: {} != {}",
-                .{total_wrote, response.body.items.len});
-            return error.InvalidContentLength;
+        if (!response.send_stream and total_wrote != content_length) {
+            log.warn("Response content-length is invalid: {} != {}",
+                .{total_wrote, content_length});
+            return error.ServerError;
         }
 
 
@@ -417,7 +550,7 @@ pub const ServerConnection = struct {
         // close the connection when we're done sending our response.
         // Closing the connection is the only way to avoid reading the
         // whole input body.
-        if (!request.read_finished) {
+        if (!request.read_finished or response.disconnect_on_finish) {
             self.io.close();
         }
 
@@ -440,181 +573,6 @@ pub const ServerConnection = struct {
 };
 
 
-pub const RequestHandler = struct {
-    const STACK_SIZE = 100*1024;
-
-    // Request handler signature
-    const HandlerFn = if (std.io.is_async)
-            fn(self: *RequestHandler) callconv(.Async) anyerror!void
-        else
-            fn(self: *RequestHandler) anyerror!void;
-    const StreamFn = if (std.io.is_async)
-            fn(self: *RequestHandler, out_stream: *IOStream) callconv(.Async) anyerror!usize
-        else
-            fn(self: *RequestHandler, out_stream: *IOStream) anyerror!usize;
-
-    application: *Application,
-    request: *Request,
-    response: *Response,
-    err: ?anyerror = null,
-
-    // Generic dispatch to handle
-    dispatch: HandlerFn = defaultDispatch,
-
-    // Default handlers
-    head: HandlerFn = defaultHandler,
-    get: HandlerFn = defaultHandler,
-    post: HandlerFn = defaultHandler,
-    delete: HandlerFn = defaultHandler,
-    patch: HandlerFn = defaultHandler,
-    put: HandlerFn = defaultHandler,
-    options: HandlerFn = defaultHandler,
-    stream: ?StreamFn = null,
-    destroy: fn(self: *RequestHandler) void,
-
-    // Execute the request handler by running the dispatch function
-    // By default the dispatch function calls the method matching
-    // the request method
-    pub fn execute(self: *RequestHandler) !void {
-        if (std.io.is_async) {
-            var stack_frame: [STACK_SIZE * 2]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, self.dispatch, .{self});
-        } else {
-            try self.dispatch(self);
-        }
-    }
-
-    // Dispatches to the other handlers based on the parsed request method
-    // This can be replaced with a custom handler if necessary
-    pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
-        const handler: HandlerFn = switch (self.request.method) {
-            .Get => self.get,
-            .Put => self.put,
-            .Post => self.post,
-            .Patch => self.patch,
-            .Head => self.head,
-            .Delete => self.delete,
-            .Options => self.options,
-            else => RequestHandler.defaultHandler,
-        };
-        if (std.io.is_async) {
-            // Give a good chunk to the handler
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, handler, .{self});
-        } else {
-            return handler(self);
-        }
-    }
-
-    // Default handler request implementation
-    pub fn defaultHandler(self: *RequestHandler) anyerror!void {
-        self.response.status = responses.METHOD_NOT_ALLOWED;
-        return error.HttpError;
-    }
-
-    // Deinit
-    pub fn deinit(self: *RequestHandler) void {
-        self.destroy(self);
-    }
-
-    pub fn startStreaming(self: *RequestHandler, out_stream: *IOStream) !usize {
-        if (self.stream) |stream_fn| {
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            var f = await @asyncCall(&stack_frame, {}, stream_fn, .{self, out_stream});
-            return try f;
-        }
-        return 0;
-    }
-
-};
-
-
-// A handler is simply a a factory function which returns a RequestHandler
-pub const Handler = fn(app: *Application, request: *Request, response: *Response) anyerror!*RequestHandler;
-
-// This seems a bit excessive....
-pub fn createHandler(comptime T: type) Handler {
-    const RequestDispatcher = struct {
-        const Self  = @This();
-
-        pub fn create(app: *Application, request: *Request, response: *Response) !*RequestHandler {
-            comptime const defaultDispatch = RequestHandler.defaultDispatch;
-            comptime const defaultHandler = RequestHandler.defaultHandler;
-            const self = try response.allocator.create(T);
-            self.* = T{
-                .handler = RequestHandler{
-                    .application = app,
-                    .request = request,
-                    .response = response,
-                    .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
-                    .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
-                    .get = if (@hasDecl(T, "get")) Self.get else defaultHandler,
-                    .post = if (@hasDecl(T, "post")) Self.post else defaultHandler,
-                    .delete = if (@hasDecl(T, "delete")) Self.delete else defaultHandler,
-                    .patch = if (@hasDecl(T, "patch")) Self.patch else defaultHandler,
-                    .put = if (@hasDecl(T, "put")) Self.put else defaultHandler,
-                    .options = if (@hasDecl(T, "options")) Self.options else defaultHandler,
-                    .stream = if (@hasDecl(T, "stream")) Self.stream else null,
-                    .destroy = Self.destroy,
-                },
-            };
-            return &self.handler;
-        }
-
-        pub fn dispatch(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.dispatch(req.request, req.response);
-        }
-
-        pub fn head(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.head(req.request, req.response);
-        }
-
-        pub fn get(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.get(req.request, req.response);
-        }
-
-        pub fn post(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.post(req.request, req.response);
-        }
-
-        pub fn delete(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.delete(req.request, req.response);
-        }
-
-        pub fn patch(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.patch(req.request, req.response);
-        }
-
-        pub fn put(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.put(req.request, req.response);
-        }
-
-        pub fn options(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.options(req.request, req.response);
-        }
-
-        pub fn destroy(req: *RequestHandler) void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            //req.allocator.destroy(handler);
-        }
-
-        pub fn stream(req: *RequestHandler, out_stream: *IOStream) !usize {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.stream(out_stream);
-        }
-    };
-
-    return RequestDispatcher.create;
-}
-
 pub const Route = struct {
     name: []const u8, // Reverse url name
     path: []const u8, // Path pattern
@@ -632,7 +590,7 @@ pub const Route = struct {
     }
 
     pub fn static(comptime name: []const u8, comptime path: []const u8) Route {
-        if (path[0] != '/' or path[path.len-1] != '/') {
+        if (path.len < 2 or path[0] != '/' or path[path.len-1] != '/') {
             @compileError("Route url path must start and end with /");
         }
         return Route{
@@ -652,6 +610,20 @@ pub const Route = struct {
         return mem.eql(u8, path, self.path);
     }
 };
+
+
+test "route-matches" {
+    const MainHandler = struct {handler: web.RequestHandler};
+    const r = Route.create("home", "/", MainHandler);
+    std.testing.expect(r.matches("/"));
+    std.testing.expect(!r.matches("/hello/"));
+}
+
+test "route-static" {
+    const r = Route.static("assets", "/assets/");
+    std.testing.expect(!r.matches("/"));
+    std.testing.expect(r.matches("/assets/img.jpg"));
+}
 
 
 pub const Router = struct {
@@ -678,13 +650,13 @@ pub const Router = struct {
         return error.NotFound;
     }
 
-    pub fn reverseUrl(self: *Router, name: []const u8, args: anytype) ![]const u8 {
+    pub fn reverseUrl(self: *Router, name: []const u8, args: anytype) []const u8 {
         for (self.routes) |route| {
             if (mem.eql(u8, route.name, name)) {
                 return route.path;
             }
         }
-        return error.NotFound;
+        return null;
     }
 
 };
@@ -713,15 +685,21 @@ pub const Application = struct {
         /// Will only parse this many request headers
         max_header_count: u8 = 32,
 
+        // If headers are longer than this return a request headers too large error
+        max_request_headers_size: u32 = 10*1024,
+
         /// Size of request buffer
         request_buffer_size: u32 = 65536,
 
         // Fixed memory buffer size for request handlers to allocate in
         handler_buffer_size: u32 = 5*1024,
 
+        // If request line is longer than this return a request uri too long error
+        max_request_line_size: u32 = 4096,
+
         // If the content length is over the request buffer size
         // it will spool to a temp file on disk up to this size
-        max_body_size: u64 = 5*1000*1000, // 5 MB
+        max_content_length: u64 = 50*1024*1024, // 50 MB
 
         /// Size of response buffer
         response_buffer_size: u32 = 65536,
@@ -790,7 +768,7 @@ pub const Application = struct {
         try self.mimetypes.load();
 
         // Ignore sigpipe
-        var act = std.os.Sigaction{
+        var act = os.Sigaction{
             .sigaction = os.SIG_IGN,
             .mask = os.empty_sigset,
             .flags = 0,
@@ -834,7 +812,7 @@ pub const Application = struct {
         // if the middleware returns true the response is considered to be
         // handled and request processing stops here
         for (self.middleware.items) |middleware| {
-            var done = try middleware.processRequest(request, response);
+            const done = try middleware.processRequest(request, response);
             if (done) return null;
         }
 
@@ -888,3 +866,8 @@ pub const Application = struct {
     }
 
 };
+
+
+test "app" {
+    std.testing.refAllDecls(@This());
+}

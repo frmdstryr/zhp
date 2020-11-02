@@ -4,14 +4,12 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const testing = std.testing;
 const mem = std.mem;
+const math = std.math;
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const File = std.fs.File;
-const math = std.math;
 const assert = std.debug.assert;
-const builtin = @import("builtin");
-const Buffer = std.Buffer;
 
 pub const Bytes = std.ArrayList(u8);
 
@@ -548,7 +546,7 @@ pub fn StringArrayMap(comptime T: type) type {
         }
 
         // Return first field
-        pub fn get(self: *Self, name: []const u8) ?[]const u8 {
+        pub fn get(self: *Self, name: []const u8) ?T {
             if (self.getArray(name)) |array| {
                 return if (array.items.len > 0) array.items[0] else null;
             }

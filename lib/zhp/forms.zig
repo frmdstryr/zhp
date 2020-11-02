@@ -9,23 +9,24 @@ const ascii = std.ascii;
 const mem = std.mem;
 const testing = std.testing;
 const Allocator = mem.Allocator;
-const Request = @import("web.zig").Request;
-const Headers = @import("web.zig").Headers;
-const util = @import("util.zig");
+
+const web = @import("zhp.zig");
+const util = web.util;
+const Request = web.Request;
+const Headers = web.Headers;
 
 
-pub const HttpFile = struct {
-    // Represents a file uploaded via a form.
 
+// Represents a file uploaded via a form.
+pub const FileUpload = struct {
     filename: []const u8,
     content_type: []const u8,
     body: []const u8,
-
 };
 
 
 pub const ArgMap = util.StringArrayMap([]const u8);
-pub const FileMap = util.StringArrayMap(HttpFile);
+pub const FileMap = util.StringArrayMap(FileUpload);
 const WS = " \t\r\n";
 
 
@@ -49,7 +50,17 @@ pub const Form = struct {
 
     pub fn parse(self: *Form, request: *Request) !void {
         const content_type = try request.headers.get("Content-Type");
-        try self.parseMultipart(content_type, request.body);
+        if (request.stream) |stream| {
+            try request.readBody(stream);
+        }
+        if (request.content) |content| {
+            switch (content.type) {
+                .TempFile => {},
+                .Buffer => {
+                    try self.parseMultipart(content_type, content.data.buffer);
+                }
+            }
+        }
     }
 
     pub fn parseMultipart(self: *Form, content_type: []const u8, data: []const u8) !void {
@@ -130,7 +141,7 @@ pub const Form = struct {
             if (disp_params.contains("filename")) {
                 const content_type = disp_params.getDefault(
                     "Content-Type", "application/octet-stream");
-                try self.files.append(field_name, HttpFile{
+                try self.files.append(field_name, FileUpload{
                     .filename = disp_params.getDefault("filename", ""),
                     .body = field_value,
                     .content_type = content_type,

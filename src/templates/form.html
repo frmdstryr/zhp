@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>Audio Stream</title>
+		<title>Form</title>
 		<link rel="icon" href="/static/img/favicon.ico">
 		<link rel="stylesheet" type="text/css" href="/static/css/uikit.min.css">
 	</head>
@@ -12,15 +12,10 @@
 		<div class="uk-position-cover uk-overlay-primary"></div>
 		<!-- /overlay -->
 		<div class="uk-position-bottom-center uk-position-small uk-visible@m uk-position-z-index">
-			<span class="uk-text-small uk-text-muted">© 2020 | Streaming live from <a href="https://www.sevenfm.nl/">Seven FM</a> | Served to you by <a href="https://github.com/frmdstryr/zhp" target="_blank">ZHP</a></span>
+			<span class="uk-text-small uk-text-muted">Served to you by <a href="https://github.com/frmdstryr/zhp" target="_blank">ZHP</a></span>
 		</div>
 		<div class="uk-width-medium uk-padding-small uk-position-z-index" uk-scrollspy="cls: uk-animation-fade">
-			<div class="uk-text-center uk-margin">
-				<a href="https://www.sevenfm.nl/">
-                    <img src="/static/img/sevenfm-logo.png" alt="Seven FM">
-                </a>
-			</div>
-            <audio controls="controls" autoplay="autoplay" src="/stream/live/"></audio>
+			{% form %}
 		</div>
 
 		<!-- JS FILES -->

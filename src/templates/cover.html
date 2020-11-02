@@ -13,9 +13,7 @@
 	</head>
 	<body>
     <div class="uk-light wrap uk-background-norepeat uk-background-cover uk-background-center-center uk-cover-container uk-background-secondary">
-      <img
-           data-src="/static/img/engine-2682239-1920.jpg" alt="" data-uk-cover data-uk-img
-      >
+      <img data-src="/static/img/engine-2682239-1920.jpg" alt="" data-uk-cover data-uk-img>
       <div class="uk-flex uk-flex-center uk-flex-middle uk-height-viewport uk-position-z-index uk-position-relative" data-uk-height-viewport="min-height: 400" style="background-color: rgba(0, 0, 0, 0.5);">
 
         <!-- NAV -->
@@ -35,6 +33,7 @@
                   <li class="uk-visible@s"><a href="/json/">JSON</a></li>
                   <li class="uk-visible@s"><a href="/hello">Hello</a></li>
                   <li class="uk-visible@s"><a href="/stream/">Stream</a></li>
+                  <li class="uk-visible@s"><a href="/not-found/">Not Found</a></li>
                   <li><a class="uk-navbar-toggle" data-uk-toggle data-uk-navbar-toggle-icon href="#offcanvas-nav"></a></li>
                 </ul>
               </div>
@@ -76,23 +75,16 @@
 		<div id="offcanvas-nav" data-uk-offcanvas="flip: true; overlay: false">
 			<div class="uk-offcanvas-bar uk-offcanvas-bar-animation uk-offcanvas-slide">
 				<button class="uk-offcanvas-close uk-close uk-icon" type="button" data-uk-close></button>
+				<h3>Pages</h3>
 				<ul class="uk-nav uk-nav-default">
-					<li class="uk-active"><a href="#">Active</a></li>
-					<li class="uk-parent">
-						<a href="#">Parent</a>
-						<ul class="uk-nav-sub">
-							<li><a href="#">Sub item</a></li>
-							<li><a href="#">Sub item</a></li>
-						</ul>
-					</li>
-					<li class="uk-nav-header">Header</li>
-					<li><a href="#js-options"><span class="uk-margin-small-right uk-icon" data-uk-icon="icon: table"></span> Item</a></li>
-					<li><a href="#"><span class="uk-margin-small-right uk-icon" data-uk-icon="icon: thumbnails"></span> Item</a></li>
-					<li class="uk-nav-divider"></li>
-					<li><a href="#"><span class="uk-margin-small-right uk-icon" data-uk-icon="icon: trash"></span> Item</a></li>
+					<li class="uk-active"><a href="/">Home</a></li>
+					<li><a href="/form/">Form</a></li>
+                    <li><a href="/500/">Error</a></li>
+                    <li><a href="/json/">JSON</a></li>
+                    <li><a href="/hello">Hello</a></li>
+                    <li><a href="/stream/">Stream</a></li>
+                    <li><a href="/not-found/">Not Found</a></li>
 				</ul>
-				<h3>Title</h3>
-				<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
 			</div>
 		</div>
 		<!-- /OFFCANVAS -->

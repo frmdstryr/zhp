@@ -4,7 +4,7 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
-const web = @import("web.zig");
+const web = @import("zhp.zig");
 const log = std.log;
 const Request = web.Request;
 const Response = web.Response;
