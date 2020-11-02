@@ -29,7 +29,7 @@ pub fn main() anyerror!void {
         std.debug.warn("Connected to {}\n", .{conn.address});
         var frame = async handleConn(conn);
         await frame catch |err| {
-            std.debug.warn("Distconnected {}: {}\n", .{conn.address, err});
+            std.debug.warn("Disconnected {}: {}\n", .{conn.address, err});
         };
     }
 }

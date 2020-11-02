@@ -49,6 +49,7 @@ const token_map = [_]u1{
 };
 
 pub inline fn isTokenChar(ch: u8) bool {
+    @setRuntimeSafety(false);
     return token_map[ch] == 1;
 }
 
@@ -180,18 +181,46 @@ pub const IOStream = struct {
         // No swap needed
         if (buffer.ptr == self.in_buffer.ptr) return;
 
-        // Don't toss previous bytes
-        self.in_buffer = buffer; // Set it right away
-        self._in_start_index = buffer.len;
-        self._in_end_index = buffer.len;
-        self.unbuffered = false;
         // So we know not to free the in buf at deinit
         self.owns_in_buffer = false;
+        self.unbuffered = false;
+
+        // Copy what is left
+        const remaining = self.readBuffered();
+        if (remaining.len > 0) {
+            std.mem.copy(u8, buffer, remaining);
+            self.in_buffer = buffer; // Set it right away
+            self._in_start_index = 0;
+            self._in_end_index = remaining.len;
+        } else {
+            self.in_buffer = buffer; // Set it right away
+            self._in_start_index = buffer.len;
+            self._in_end_index = buffer.len;
+        }
     }
 
     // Switch between buffered and unbuffered reads
     pub fn readUnbuffered(self: *Self, unbuffered: bool) void {
         self.unbuffered = unbuffered;
+    }
+
+    pub fn shiftAndFillBuffer(self: *Self, start: usize) !usize {
+        self.unbuffered = true;
+        defer self.unbuffered = false;
+
+        // Move buffer to beginning
+        const end = self.readCount();
+        const remaining = self.in_buffer[start..end];
+        std.mem.copyBackwards(u8, self.in_buffer, remaining);
+
+        // Try to read more
+        if (remaining.len >= self.in_buffer.len) {
+            return error.EndOfBuffer;
+        }
+        const n = try self.reader().read(self.in_buffer[remaining.len..]);
+        self._in_start_index = 0;
+        self._in_end_index = remaining.len + n;
+        return n;
     }
 
     // ------------------------------------------------------------------------
@@ -217,6 +246,10 @@ pub const IOStream = struct {
         const n = math.min(size, self.amountBuffered());
         self._in_start_index += n;
         return n;
+    }
+
+    pub inline fn readBuffered(self: *Self) []u8 {
+        return self.in_buffer[self._in_start_index..self._in_end_index];
     }
 
     fn readFn(self: *Self, dest: []u8) !usize {

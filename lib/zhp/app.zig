@@ -415,11 +415,6 @@ pub const ServerConnection = struct {
             // If an error ocurred during parsing or running the handler
             // invoke the error handler
             if (server_request.err) |err| {
-                if (self.application.options.debug) {
-                    log.warn("server error: {} {}", .{err, request});
-                } else {
-                    log.warn("server error: {} {}", .{err, self.address});
-                }
                 self.handler = try server_request.buildHandler(
                     app.error_handler, request, response);
                 const err_handler = self.handler.?;
@@ -429,8 +424,19 @@ pub const ServerConnection = struct {
                 switch (err) {
                     error.BrokenPipe, error.EndOfStream, error.ConnectionResetByPeer => {
                         self.io.closed = true; // Make sure no response is sent
+
+                        // Only log if it was a partial request
+                        if (request.method != .Unknown) {
+                            log.warn("connection error: {} {}", .{err, self.address});
+                        }
                     },
-                    else => {},
+                    else => {
+                        if (self.application.options.debug) {
+                            log.warn("server error: {} {}", .{err, request});
+                        } else {
+                            log.warn("server error: {} {}", .{err, self.address});
+                        }
+                    },
                 }
             }
 

@@ -14,6 +14,8 @@ script:
     # Test individual files
     - zig test -OReleaseSafe lib/zhp/app.zig
 
+    # Run parser test
+    - zig run --pkg-begin zhp lib/zhp/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
 
     # Make sure this repo builds
     - zig build -Drelease-safe=true install

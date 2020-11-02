@@ -233,6 +233,7 @@ pub const Headers = struct {
         var index: usize = undefined;
         var key: ?[]u8 = null;
         var value: ?[]u8 = null;
+        const read_limit = max_size + stream.readCount();
 
         // Strip any whitespace
         while (self.headers.items.len < self.headers.capacity) {
@@ -256,7 +257,7 @@ pub const Headers = struct {
                     index = stream.readCount()-1;
 
                     // Read Key
-                    while (stream.readCount() < max_size) {
+                    while (stream.readCount() < read_limit) {
                         if (ch == ':') break;
                         if (!util.isTokenChar(ch)) return error.BadRequest;
                         ch = try stream.readByteFast();
@@ -266,7 +267,7 @@ pub const Headers = struct {
                     key = buf.items[index..stream.readCount()-1];
 
                     // Strip whitespace
-                    while (stream.readCount() < max_size) {
+                    while (stream.readCount() < read_limit) {
                         ch = try stream.readByteFast();
                         if (!(ch == ' ' or ch == '\t')) break;
                     }
@@ -275,7 +276,7 @@ pub const Headers = struct {
 
             // Read value
             index = stream.readCount()-1;
-            while (stream.readCount() < max_size) {
+            while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
                 ch = try stream.readByteFast();
             }
@@ -285,7 +286,7 @@ pub const Headers = struct {
             //value = buf.items[index..buf.len];
 
             // Ignore any remaining non-print characters
-            while (stream.readCount() < max_size) {
+            while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
                 ch = try stream.readByteFast();
             }
@@ -301,9 +302,7 @@ pub const Headers = struct {
             // Next
             try self.append(key.?, value.?);
         }
-        if (stream.readCount() > max_size) {
-            return error.RequestHeaderFieldsTooLarge;
-        }
+        if (stream.readCount() >= read_limit) return error.RequestHeaderFieldsTooLarge;
 
     }
 

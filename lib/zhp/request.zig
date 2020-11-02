@@ -144,11 +144,24 @@ pub const Request = struct {
         // Want to dump directly into the request buffer
         self.buffer.expandToCapacity();
         stream.swapBuffer(self.buffer.items);
+        var start = stream.readCount();
 
+        if (stream.amountBuffered() == 0) {
+            try stream.fillBuffer();
+        }
         // TODO: This should retry if the error is EndOfBuffer which means
         // it got a partial request
-        try stream.fillBuffer();
-        return self.parseNoSwap(stream, options);
+        while (true) {
+            return self.parseNoSwap(stream, options) catch |err| switch (err) {
+                error.EndOfBuffer => {
+                    const n = try stream.shiftAndFillBuffer(start);
+                    if (n == 0) return error.EndOfStream;
+                    start = 0;
+                    continue;
+                },
+                else => return err,
+            };
+        }
     }
 
     inline fn parseTest(self: *Request, stream: *IOStream) !usize {
@@ -173,13 +186,14 @@ pub const Request = struct {
     // readByteFast is 3x faster but doesn't handle slowloris
     pub inline fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
         const buf = &self.buffer;
+        const read_limit = max_size + stream.readCount();
 
         // FIXME: If the whole method is not in the initial read
         // buffer this bails out
         var ch: u8 = try stream.readByteFast();
 
         // Skip any leading CRLFs
-        while (stream.readCount() < max_size) {
+        while (stream.readCount() < read_limit) {
             switch (ch) {
                 '\r' => {
                     ch = try stream.readByteFast();
@@ -190,7 +204,9 @@ pub const Request = struct {
             }
             ch = try stream.readByteFast();
         }
-        if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
+        if (stream.readCount() >= read_limit) {
+            return error.RequestUriTooLong; // Too Big
+        }
 
         // Read the method
         switch (ch) {
@@ -284,6 +300,7 @@ pub const Request = struct {
     pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
         const buf = self.buffer.items;
         const index = stream.readCount();
+        const read_limit = max_size + stream.readCount();
 
         var ch = try stream.readByteFast();
         switch (ch) {
@@ -312,11 +329,14 @@ pub const Request = struct {
                 // Read host
                 // TODO: This does not support the ip address format
                 const host_start = stream.readCount();
-                while (stream.readCount() < max_size) {
+                while (stream.readCount() < read_limit) {
                     ch = try stream.readByteFast();
                     if (!ascii.isAlNum(ch) and ch != '.' and ch != '-') break;
+
                 }
-                if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
+                if (stream.readCount() >= read_limit) {
+                    return error.RequestUriTooLong; // Too Big
+                }
 
                 if (ch == ':') {
                     // Read port, can be at most 5 digits (65535) so we
@@ -348,9 +368,10 @@ pub const Request = struct {
     pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
         const buf = self.buffer.items;
         const index = stream.readCount()-1;
+        const read_limit = max_size + stream.readCount();
         var query_start: ?usize = null;
 
-        while (stream.readCount() < max_size) {
+        while (stream.readCount() < read_limit) {
             const ch = try stream.readByteFast();
             if (!ascii.isGraph(ch)) {
                 if (ch == ' ') break;
@@ -360,7 +381,9 @@ pub const Request = struct {
                 query_start = stream.readCount();
             }
         }
-        if (stream.readCount() >= max_size) return error.RequestUriTooLong; // Too Big
+        if (stream.readCount() >= read_limit) {
+            return error.RequestUriTooLong; // Too Big
+        }
 
         const end = stream.readCount()-1;
         if (query_start) |q| {
@@ -503,7 +526,9 @@ pub const Request = struct {
         try std.fmt.format(out_stream, "  .method={},\n", .{self.method});
         try std.fmt.format(out_stream, "  .version={},\n", .{self.version});
         try std.fmt.format(out_stream, "  .scheme={},\n", .{self.scheme});
-        try std.fmt.format(out_stream, "  .uri={},\n", .{self.uri});
+        try std.fmt.format(out_stream, "  .host={},\n", .{self.host});
+        try std.fmt.format(out_stream, "  .path={},\n", .{self.path});
+        try std.fmt.format(out_stream, "  .query={},\n", .{self.query});
         try std.fmt.format(out_stream, "  .headers={},\n", .{self.headers});
         if (self.content) |content| {
             const n = std.math.min(self.content_length, 1024);
