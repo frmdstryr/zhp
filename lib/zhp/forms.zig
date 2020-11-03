@@ -50,12 +50,16 @@ pub const Form = struct {
 
     pub fn parse(self: *Form, request: *Request) !void {
         const content_type = try request.headers.get("Content-Type");
-        if (request.stream) |stream| {
-            try request.readBody(stream);
+        if (!request.read_finished) {
+            if (request.stream) |stream| {
+                try request.readBody(stream);
+            }
         }
         if (request.content) |content| {
             switch (content.type) {
-                .TempFile => {},
+                .TempFile => {
+                    return error.NotImplemented; // TODO: Parsing should use a stream
+                },
                 .Buffer => {
                     try self.parseMultipart(content_type, content.data.buffer);
                 }
@@ -119,7 +123,7 @@ pub const Form = struct {
             // NOTE: Do not free, data is assumed to be owned
             // also do not do this after parsing or the it will cause a memory leak
             headers.reset();
-            try headers.parseBuffer(body, body.len);
+            try headers.parseBuffer(body, body.len+1);
 
 
             const disp_header = headers.getDefault("Content-Disposition", "");
