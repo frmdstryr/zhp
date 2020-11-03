@@ -215,7 +215,6 @@ pub fn createHandler(comptime T: type) Handler {
 
 
 pub const ServerRequest = struct {
-    const STACK_SIZE = 10*1024;
     allocator: *Allocator,
     application: *Application,
 
@@ -257,18 +256,6 @@ pub const ServerRequest = struct {
         self.response.allocator = &self.buffer.allocator;
     }
 
-    // Build the request handler to generate a response
-    fn buildHandler(self: *ServerRequest, factoryFn: Handler,
-                    request: *Request, response: *Response) !*RequestHandler {
-        if (std.io.is_async) {
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, factoryFn,
-                .{self.application, request, response});
-        } else {
-            return factoryFn(self.application, request, response);
-        }
-    }
-
     // Reset so it can be reused
     pub fn reset(self: *ServerRequest) void {
         self.buffer.reset();
@@ -289,7 +276,6 @@ pub const ServerRequest = struct {
     pub fn deinit(self: *ServerConnection) void {
         self.request.deinit();
         self.response.deinit();
-        //self.allocator.free(self.stack_frame);
         self.allocator.free(self.storage);
     }
 
@@ -313,11 +299,8 @@ pub const ServerConnection = struct {
     pub fn init(allocator: *Allocator, application: *Application) !ServerConnection {
         return ServerConnection{
             .application = application,
-            //.storage = try allocator.alloc(u8, 100*1024),
             .io = try IOStream.initCapacity(allocator, null, 0, mem.page_size),
             .frame = try allocator.create(Frame),
-            //.server_request = try ServerRequest.init(allocator, application),
-            //.requests = try RequestList.initCapacity(allocator, 8),
         };
     }
 
@@ -379,6 +362,18 @@ pub const ServerConnection = struct {
             request.stream = &self.io;
             const n = request.parse(&self.io, options) catch |err| blk: {
                 server_request.err = err;
+
+//                 if (params.debug) {
+//                     if (@errorReturnTrace()) |trace| {
+//                         try std.debug.writeStackTrace(
+//                             trace.*,
+//                             &std.io.getStdErr().writer(),
+//                             response.allocator,
+//                             try std.debug.getSelfDebugInfo(),
+//                             std.debug.detectTTYConfig());
+//                     }
+//                 }
+
                 break :blk self.io.readCount();
             };
 
@@ -390,8 +385,7 @@ pub const ServerConnection = struct {
             // If we got a handler read the body and run it
             if (server_request.err == null and factoryFn != null) {
                 const factory = factoryFn.?;
-                self.handler = try server_request.buildHandler(
-                    factory, request, response);
+                self.handler = try factory(app, request, response);
 
                 const handler = self.handler.?;
 
@@ -415,8 +409,7 @@ pub const ServerConnection = struct {
             // If an error ocurred during parsing or running the handler
             // invoke the error handler
             if (server_request.err) |err| {
-                self.handler = try server_request.buildHandler(
-                    app.error_handler, request, response);
+                self.handler = try app.error_handler(app, request, response);
                 const err_handler = self.handler.?;
                 err_handler.err = err;
                 try err_handler.execute();
@@ -566,8 +559,8 @@ pub const ServerConnection = struct {
     pub fn release(self: *ServerConnection) void {
         const app = self.application;
         const lock = app.connection_pool.lock.acquire();
-            app.connection_pool.release(self);
-        lock.release();
+        defer lock.release();
+        app.connection_pool.release(self);
     }
 
     pub fn deinit(self: *ServerConnection) void {
