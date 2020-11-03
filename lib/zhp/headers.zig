@@ -7,7 +7,6 @@ const std = @import("std");
 const ascii = std.ascii;
 const mem = std.mem;
 const testing = std.testing;
-const Buffer = std.Buffer;
 const Allocator = std.mem.Allocator;
 
 const util = @import("util.zig");
@@ -148,7 +147,7 @@ pub const Headers = struct {
     ) !void {
         try std.fmt.format(out_stream, "Headers{{", .{});
         for (self.headers.items) |header| {
-            try std.fmt.format(out_stream, "{}:\"{}\", ", .{header.key, header.value});
+            try std.fmt.format(out_stream, "\"{}\": \"{}\", ", .{header.key, header.value});
         }
         try std.fmt.format(out_stream, "}}", .{});
     }
@@ -157,6 +156,10 @@ pub const Headers = struct {
     pub fn get(self: *Headers, key: []const u8) ![]const u8 {
         const i = try self.lookup(key);
         return self.headers.items[i].value;
+    }
+
+    pub fn getOptional(self: *Headers, key: []const u8) ?[]const u8 {
+        return self.get(key) catch null;
     }
 
     // Get the index of the  key
@@ -233,8 +236,8 @@ pub const Headers = struct {
         var index: usize = undefined;
         var key: ?[]u8 = null;
         var value: ?[]u8 = null;
-        const read_limit = max_size + stream.readCount();
 
+        const read_limit = max_size + stream.readCount();
         // Strip any whitespace
         while (self.headers.items.len < self.headers.capacity) {
             // TODO: This assumes that the whole header in the buffer
@@ -253,12 +256,13 @@ pub const Headers = struct {
                 },
                 ':' => return error.BadRequest, // Empty key
                 else => {
-                    //index = buf.len;
                     index = stream.readCount()-1;
 
                     // Read Key
-                    while (stream.readCount() < read_limit) {
-                        if (ch == ':') break;
+                    while (stream.readCount() < read_limit and ch != ':') {
+                        // If we get a bad request here it's most likely because
+                        // the client didn't send a \r\n after its last header
+                        // TODO: Should this be allowed?
                         if (!util.isTokenChar(ch)) return error.BadRequest;
                         ch = try stream.readByteFast();
                     }
@@ -281,9 +285,8 @@ pub const Headers = struct {
                 ch = try stream.readByteFast();
             }
 
-            // TODO: Strip trailing spaces and tabs
+            // TODO: Strip trailing spaces and tabs?
             value = buf.items[index..stream.readCount()-1];
-            //value = buf.items[index..buf.len];
 
             // Ignore any remaining non-print characters
             while (stream.readCount() < read_limit) {
@@ -297,13 +300,10 @@ pub const Headers = struct {
             }
             if (ch != '\n') return error.BadRequest;
 
-            //std.debug.warn("Found header: {}={}\n", .{key.?, value.?});
-
-            // Next
+            //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
             try self.append(key.?, value.?);
         }
         if (stream.readCount() >= read_limit) return error.RequestHeaderFieldsTooLarge;
-
     }
 
     pub fn parseBuffer(self: *Headers, data: []const u8, max_size: usize) !void {

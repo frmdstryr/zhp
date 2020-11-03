@@ -8,6 +8,7 @@
 const std = @import("std");
 const time = std.time;
 const math = std.math;
+const ascii = std.ascii;
 
 const Order = std.math.Order;
 
@@ -39,10 +40,43 @@ pub const Month = enum {
     September,
     October,
     November,
-    December
+    December,
+
+    // Convert an abbreviation, eg Jan to the enum value
+    pub fn parseAbbr(month: []const u8) !Month {
+        if (month.len == 3) {
+            inline for (std.meta.fields(Month)) |f| {
+                if (ascii.eqlIgnoreCase(f.name[0..3], month)) {
+                    return @intToEnum(Month, f.value);
+                }
+            }
+        }
+        return error.InvalidFormat;
+    }
+
+    pub fn parseName(month: []const u8) !Month {
+        inline for (std.meta.fields(Month)) |f| {
+            if (ascii.eqlIgnoreCase(f.name, month)) {
+                return @intToEnum(Month, f.value);
+            }
+        }
+        return error.InvalidFormat;
+    }
 };
 
+test "month-parse-abbr" {
+    testing.expectEqual(try Month.parseAbbr("Jan"), .January);
+    testing.expectEqual(try Month.parseAbbr("Oct"), .October);
+    testing.expectEqual(try Month.parseAbbr("sep"), .September);
+    testing.expectError(error.InvalidFormat, Month.parseAbbr("cra"));
+}
 
+test "month-parse" {
+    testing.expectEqual(try Month.parseName("January"), .January);
+    testing.expectEqual(try Month.parseName("OCTOBER"), .October);
+    testing.expectEqual(try Month.parseName("july"), .July);
+    testing.expectError(error.InvalidFormat, Month.parseName("NoShaveNov"));
+}
 
 pub const MIN_YEAR: u16 = 1;
 pub const MAX_YEAR: u16 = 9999;
@@ -606,8 +640,6 @@ pub const Timezone = struct {
 };
 
 
-
-
 pub const Time = struct {
     hour: u8 = 0, // 0 to 23
     minute: u8 = 0, // 0 to 59
@@ -957,6 +989,12 @@ pub const Datetime = struct {
         };
     }
 
+    // From a file modified time in ns
+    pub fn fromModifiedTime(mtime: i128) Datetime {
+        const ts = @intCast(i64, @divFloor(mtime, time.ns_per_ms));
+        return Datetime.fromTimestamp(ts);
+    }
+
     // To a UTC POSIX timestamp in milliseconds relative to 1 Jan 1970
     pub fn toTimestamp(self: Datetime) i128 {
         const ds = self.date.toTimestamp();
@@ -1126,6 +1164,25 @@ pub const Datetime = struct {
         return Datetime.formatHttpFromTimestamp(allocator, ts);
     }
 
+    // ------------------------------------------------------------------------
+    // Parsing methods
+    // ------------------------------------------------------------------------
+
+    // Parse a HTTP If-Modified-Since header
+    // in the format "<day-name>, <day> <month> <year> <hour>:<minute>:<second> GMT"
+    // eg, "Wed, 21 Oct 2015 07:28:00 GMT"
+    pub fn parseModifiedSince(ims: []const u8) !Datetime {
+        const value = std.mem.trim(u8, ims, " ");
+        if (value.len < 29) return error.InvalidFormat;
+        const day = std.fmt.parseInt(u8, value[5..7], 10) catch return error.InvalidFormat;
+        const month = @enumToInt(try Month.parseAbbr(value[8..11]));
+        const year = std.fmt.parseInt(u16, value[12..16], 10) catch return error.InvalidFormat;
+        const hour = std.fmt.parseInt(u8, value[17..19], 10) catch return error.InvalidFormat;
+        const minute = std.fmt.parseInt(u8, value[20..22], 10) catch return error.InvalidFormat;
+        const second = std.fmt.parseInt(u8, value[23..25], 10) catch return error.InvalidFormat;
+        return Datetime.create(year, month, day, hour, minute, second, 0, null);
+    }
+
 };
 
 
@@ -1232,6 +1289,16 @@ test "datetime-subtract" {
      b = try Datetime.create(2019, 12, 2, 11, 0, 0, 466545, null);
      delta = a.sub(b);
      testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
+}
+
+test "datetime-parse-modified-since" {
+    const str = " Wed, 21 Oct 2015 07:28:00 GMT ";
+    testing.expectEqual(
+        try Datetime.parseModifiedSince(str),
+        try Datetime.create(2015, 10, 21, 7, 28, 0, 0, null));
+
+    testing.expectError(error.InvalidFormat,
+        Datetime.parseModifiedSince("21/10/2015"));
 }
 
 test "file-modified-date" {

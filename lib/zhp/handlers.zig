@@ -92,6 +92,8 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         const Self = @This();
         handler: web.RequestHandler,
         file: ?fs.File = null,
+        start: usize = 0,
+        end: usize = 0,
 
         pub fn get(self: *Self, request: *web.Request,
                    response: *web.Response) !void {
@@ -116,41 +118,154 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
                 //log.warn("Static file error: {}", .{err});
                 return self.renderNotFound(request, response);
             };
+            errdefer file.close();
 
             // Get file info
             const stat = try file.stat();
+            var modified = Datetime.fromModifiedTime(stat.mtime);
 
-            // TODO: Determine actual content type
-            const content_type = mimetypes.getTypeFromFilename(full_path)
-                orelse "application/octet-stream";
-            try response.headers.append("Content-Type", content_type);
+            // If the file was not modified, return 304
+            if (self.checkNotModified(request, modified)) {
+                response.status = web.responses.NOT_MODIFIED;
+                file.close();
+                return;
+            }
+
+            try response.headers.append("Accept-Ranges", "bytes");
+
+            // Set etag header
+            if (self.getETagHeader()) |etag| {
+                try response.headers.append("ETag", etag);
+            }
 
             // Set last modified time for caching purposes
+            // NOTE: The modified result doesn't need freed since the response handles that
             try response.headers.append("Last-Modified",
-                try Datetime.formatHttpFromModifiedDate(allocator, stat.mtime));
+                try modified.formatHttp(allocator));
 
-            const range_header = request.headers.getDefault("Range", "");
-            if (range_header.len > 0) {
-                // TODO: Parse range header
+            // TODO: cache control
+
+            self.end = stat.size;
+            var size: usize = stat.size;
+
+            if (request.headers.getOptional("Range")) |range_header| {
                 // As per RFC 2616 14.16, if an invalid Range header is specified,
                 // the request will be treated as if the header didn't exist.
                 // response.status = responses.PARTIAL_CONTENT;
+                if (range_header.len > 8 and mem.startsWith(u8, range_header, "bytes=")) {
+                    var it = mem.split(range_header[6..], ",");
+
+                    // Only support the first range
+                    const range = mem.trim(u8, it.next().?, " ");
+                    var tokens = mem.split(range, "-");
+                    var range_end: ?[]const u8 = null;
+
+                    if (range[0] == '-') {
+                        range_end = tokens.next().?; // First one never fails
+                    } else {
+                        const range_start = tokens.next().?; // First one never fails
+                        self.start = std.fmt.parseInt(usize, range_start, 10) catch 0;
+                        range_end = tokens.next();
+                    }
+
+                    if (range_end) |value| {
+                        const end = std.fmt.parseInt(usize, value, 10) catch 0;
+                        if (end > self.start) {
+                            // Clients sometimes blindly use a large range to limit their
+                            // download size; cap the endpoint at the actual file size.
+                            self.end = std.math.min(end, size);
+                        }
+                    }
+
+                    if (self.start >= size or self.end <= self.start) {
+                        // A byte-range-spec is invalid if the last-byte-pos value is present
+                        // and less than the first-byte-pos.
+                        // https://tools.ietf.org/html/rfc7233#section-2.1
+                        response.status = web.responses.REQUESTED_RANGE_NOT_SATISFIABLE;
+                        try response.headers.append("Content-Type", "text/plain");
+                        try response.headers.append("Content-Range",
+                            try std.fmt.allocPrint(allocator, "bytes */{}", .{size}));
+                        file.close();
+                        return;
+                    }
+
+                    // Determine the actual size
+                    size = self.end - self.start;
+
+                    if (size != stat.size) {
+                        // If it's not the full file  se it as a partial response
+                        response.status = web.responses.PARTIAL_CONTENT;
+                        try response.headers.append("Content-Range",
+                            try std.fmt.allocPrint(allocator, "bytes {}-{}/{}", .{
+                                self.start, self.end, size}));
+                    }
+                }
             }
 
-            response.status = responses.OK;
-            var l = try std.fmt.allocPrint(response.allocator, "{}", .{stat.size});
-            try response.headers.append("Content-Length", l);
+            // Try to get the content type
+            const content_type = mimetypes.getTypeFromFilename(full_path)
+                orelse "application/octet-stream";
+            try response.headers.append("Content-Type", content_type);
+            try response.headers.append("Content-Length",
+                try std.fmt.allocPrint(allocator, "{}", .{size}));
             self.file = file;
             response.send_stream = true;
         }
 
+        // Return true if not modified and a 304 can be returned
+        pub fn checkNotModified(self: *Self, request: *web.Request, mtime: Datetime) bool {
+            // If client sent If-None-Match, use it, ignore If-Modified-Since
+            // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/ETag
+            if (request.headers.getOptional("If-None-Match")) |etag| {
+                return self.checkETagHeader(etag);
+            }
+
+            // Check if the file was modified since the header
+            // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/If-Modified-Since
+            const v = request.headers.getDefault("If-Modified-Since", "");
+            const since = Datetime.parseModifiedSince(v) catch return false;
+            return since.gte(mtime);
+        }
+
+        // Get a hash of the file
+        pub fn getETagHeader(self: *Self) ?[]const u8 {
+            // TODO: This
+            return null;
+        }
+
+        pub fn checkETagHeader(self: *Self, etag: []const u8) bool {
+            // TODO: Support other formats
+            if (self.getETagHeader()) |tag| {
+                return mem.eql(u8, tag, etag);
+            }
+            return false;
+        }
+
+        // Stream the file
         pub fn stream(self: *Self, io: *web.IOStream) !usize {
-            var total_wrote: usize = 0;
+            const total_wrote = self.end - self.start;
+            var bytes_left: usize = total_wrote;
             if (self.file) |file| {
                 defer file.close();
-                total_wrote = try io.writeFromReader(file.reader());
+
+                // Jump to requested range
+                if (self.start > 0) {
+                    try file.seekTo(self.start);
+                }
+
+                // Send it
+                var reader = file.reader();
+                try io.flush();
+                while (bytes_left > 0) {
+                    // Read into buffer
+                    const end = std.math.min(bytes_left, io.out_buffer.len);
+                    const n = try reader.read(io.out_buffer[0..end]);
+                    if (n == 0) break; // Unexpected EOF
+                    bytes_left -= n;
+                    try io.flushBuffered(n);
+                }
             }
-            return total_wrote;
+            return total_wrote - bytes_left;
         }
 
         pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {

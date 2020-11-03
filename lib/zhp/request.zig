@@ -149,6 +149,14 @@ pub const Request = struct {
         if (stream.amountBuffered() == 0) {
             try stream.fillBuffer();
         }
+
+        //std.log.debug(
+        //    \\
+        //    \\========== Buffer ==========
+        //    \\{}
+        //    \\==============================
+        //    , .{stream.readBuffered()});
+
         // TODO: This should retry if the error is EndOfBuffer which means
         // it got a partial request
         while (true) {
@@ -448,15 +456,18 @@ pub const Request = struct {
 
     pub fn readFixedBody(self: *Request, stream: *IOStream) !void {
         // End of the request
-        const end_of_request = self.head.len;
+        const end_of_headers = stream.readCount();
 
         // Anything else is the body
-        const end_of_body = self.content_length + end_of_request;
+        const end_of_body = end_of_headers + self.content_length;
 
+        // Take whatever is still buffered from the initial read up to the
+        // end of the body
+        const amt = stream.consumeBuffered(end_of_body);
+        const start = end_of_headers + amt;
 
-        // Take whatever is still buffered from the initial read
-        const amt = stream.consumeBuffered(self.content_length);
-
+        // Check if we can fit everything in the request buffer
+        // if not, write the body to a temp file
         if (end_of_body > self.buffer.capacity) {
             std.log.warn("Write to temp file", .{});
             // TODO: Write the body to a file
@@ -464,9 +475,8 @@ pub const Request = struct {
             var f = try tmp.atomicFile("zhp.tmp", .{});
 
             // Copy what was buffered
-            const start = end_of_request + amt;
             var writer = f.file.writer();
-            try writer.writeAll(self.buffer.items[end_of_request..start]);
+            try writer.writeAll(self.buffer.items[end_of_headers..start]);
 
             // Switch the stream to unbuffered mode and read directly
             // into the request buffer
@@ -489,19 +499,18 @@ pub const Request = struct {
                 .data = .{.file=f},
             };
         } else {
-            std.log.warn("Buffer", .{});
             // We can fit it in memory
-            const body = self.buffer.items[end_of_request..end_of_body];
+            const body = self.buffer.items[end_of_headers..end_of_body];
 
-            if (amt < self.content_length) {
+            // Check if the full body was already read into the buffer
+            if (start < end_of_body) {
                 // We need to read more
-                var buf = body[amt..];
-
                 // Switch the stream to unbuffered mode and read directly
                 // into the request buffer
                 stream.readUnbuffered(true);
                 defer stream.readUnbuffered(false);
-                try stream.reader().readNoEof(buf);
+                const rest_of_body = self.buffer.items[start..end_of_body];
+                try stream.reader().readNoEof(rest_of_body);
             }
             self.content = Content{
                 .type = .Buffer,
@@ -514,7 +523,6 @@ pub const Request = struct {
         return error.NotImplemented; // TODO: This
     }
 
-
     pub fn format(
         self: Request,
         comptime fmt: []const u8,
@@ -522,13 +530,13 @@ pub const Request = struct {
         out_stream: anytype,
     ) !void {
         try std.fmt.format(out_stream, "Request{{\n", .{});
-        try std.fmt.format(out_stream, "  .client={},\n", .{self.client});
+        try std.fmt.format(out_stream, "  .client=\"{}\",\n", .{self.client});
         try std.fmt.format(out_stream, "  .method={},\n", .{self.method});
         try std.fmt.format(out_stream, "  .version={},\n", .{self.version});
         try std.fmt.format(out_stream, "  .scheme={},\n", .{self.scheme});
-        try std.fmt.format(out_stream, "  .host={},\n", .{self.host});
-        try std.fmt.format(out_stream, "  .path={},\n", .{self.path});
-        try std.fmt.format(out_stream, "  .query={},\n", .{self.query});
+        try std.fmt.format(out_stream, "  .host=\"{}\",\n", .{self.host});
+        try std.fmt.format(out_stream, "  .path=\"{}\",\n", .{self.path});
+        try std.fmt.format(out_stream, "  .query=\"{}\",\n", .{self.query});
         try std.fmt.format(out_stream, "  .headers={},\n", .{self.headers});
         if (self.content) |content| {
             const n = std.math.min(self.content_length, 1024);
@@ -539,7 +547,7 @@ pub const Request = struct {
 //                         content.data.file[0..n]});
                 },
                 .Buffer => {
-                    try std.fmt.format(out_stream, "   .body='{}',\n", .{
+                    try std.fmt.format(out_stream, "  .body=\"{}\",\n", .{
                         content.data.buffer[0..n]});
                 }
             }

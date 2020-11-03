@@ -395,6 +395,12 @@ pub const IOStream = struct {
         }
     }
 
+    // Flush 'size' bytes from the start of the buffer out the stream
+    pub fn flushBuffered(self: *Self, size: usize) !void {
+        self._out_index = std.math.min(size, self.out_buffer.len);
+        try self.flush();
+    }
+
     // Read directly into the output buffer then flush it out
     pub fn writeFromReader(self: *Self, in_stream: anytype) !usize {
         var total_wrote: usize = 0;
