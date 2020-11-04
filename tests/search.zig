@@ -50,7 +50,7 @@ pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
             const start = end - n;
             const a_chunk: V8x32 = a[start..end][0..n].*;
             const b_chunk: V8x32 = b[start..end][0..n].*;
-            if (@reduce(.Xor, a_chunk == b_chunk) != 0) {
+            if (!@reduce(.And, a_chunk == b_chunk)) {
                 return false;
             }
             end = std.math.min(end+n, src.len);
