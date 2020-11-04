@@ -18,7 +18,7 @@ pub fn main() anyerror!void {
     }
     const t1 = timer.lap();
     std.testing.expectEqual(cnt, 275);
-    std.log.warn("std: {}ns", .{t1});
+
 
     var simd = Splitter.init(buf, find);
     cnt = 0;
@@ -27,10 +27,29 @@ pub fn main() anyerror!void {
         cnt += 1;
     }
     const t2 = timer.lap();
+
     std.testing.expectEqual(cnt, 275);
     std.testing.expectEqual(ptrs1, ptrs2);
-    std.log.warn("SIMD: {}ns", .{t2});
-    std.log.warn("Speedup: {}", .{@intToFloat(f32, t1)/@intToFloat(f32, t2)});
+
+    timer.reset();
+    for (ptrs1) |src, i| {
+         const dst = ptrs2[i];
+         std.testing.expect(std.mem.eql(u8, src, dst));
+    }
+    const t3 = timer.lap();
+    for (ptrs1) |src, i| {
+        const dst = ptrs2[i];
+        std.testing.expect(eql(u8, src, dst));
+    }
+    const t4 = timer.lap();
+
+    std.log.warn("split std: {}ns", .{t1});
+    std.log.warn("split SIMD: {}ns", .{t2});
+    std.log.warn("split Speedup: {}", .{@intToFloat(f32, t1)/@intToFloat(f32, t2)});
+
+    std.log.warn("eql std: {}ns", .{t3});
+    std.log.warn("eql SIMD: {}ns", .{t4});
+    std.log.warn("eql Speedup: {}", .{@intToFloat(f32, t3)/@intToFloat(f32, t4)});
 }
 
 
@@ -53,7 +72,7 @@ pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
             if (!@reduce(.And, a_chunk == b_chunk)) {
                 return false;
             }
-            end = std.math.min(end+n, src.len);
+            end = std.math.min(end+n, a.len);
         }
     }
     return true;
