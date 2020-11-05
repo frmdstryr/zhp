@@ -1,34 +1,37 @@
 const std = @import("std");
 
 pub fn main() anyerror!void {
-    const buf = @embedFile("./bigger.txt");
-
     const find = "\n\n"; // The \r are already stripped out
+    const n = 275;
+    const buf = @embedFile("./bigger.txt");
+    //const buf = @embedFile("./http-requests.txt");
+    //const n = 55;
+    //const find = "\r\n\r\n"; // The \r are already stripped out
 
-    var ptrs1: [275][]const u8 = undefined;
-    var ptrs2: [275][]const u8= undefined;
+    var ptrs1: [n][]const u8 = undefined;
+    var ptrs2: [n][]const u8= undefined;
 
     var timer = try std.time.Timer.start();
-    var split = std.mem.split(buf, find);
+    var it1 = std.mem.split(buf, find);
     var cnt: usize = 0;
 
-    while (split.next()) |req| {
+    while (it1.next()) |req| {
         ptrs1[cnt] = req;
         cnt += 1;
     }
     const t1 = timer.lap();
-    std.testing.expectEqual(cnt, 275);
+    std.testing.expectEqual(cnt, n);
 
 
-    var simd = Splitter.init(buf, find);
+    var it2 = split(buf, find);
     cnt = 0;
-    while (simd.next()) |req| {
+    while (it2.next()) |req| {
         ptrs2[cnt] = req;
         cnt += 1;
     }
     const t2 = timer.lap();
 
-    std.testing.expectEqual(cnt, 275);
+    std.testing.expectEqual(cnt, n);
     std.testing.expectEqual(ptrs1, ptrs2);
 
     timer.reset();
@@ -43,17 +46,46 @@ pub fn main() anyerror!void {
     }
     const t4 = timer.lap();
 
+    var dest: [4096]u8 = undefined;
+    timer.reset();
+    for (ptrs1) |src, i| {
+         std.mem.copy(u8, &dest, src);
+    }
+    const t5 = timer.lap();
+
+    for (ptrs1) |src, i| {
+         copy(u8, &dest, src);
+    }
+    const t6 = timer.lap();
+
     std.log.warn("split std: {}ns", .{t1});
     std.log.warn("split SIMD: {}ns", .{t2});
-    std.log.warn("split Speedup: {}", .{@intToFloat(f32, t1)/@intToFloat(f32, t2)});
+    std.log.warn("split diff: {}", .{@intToFloat(f32, t1)/@intToFloat(f32, t2)});
 
     std.log.warn("eql std: {}ns", .{t3});
     std.log.warn("eql SIMD: {}ns", .{t4});
-    std.log.warn("eql Speedup: {}", .{@intToFloat(f32, t3)/@intToFloat(f32, t4)});
+    std.log.warn("eql diff: {}", .{@intToFloat(f32, t3)/@intToFloat(f32, t4)});
+
+    std.log.warn("copy std: {}ns", .{t5});
+    std.log.warn("copy SIMD: {}ns", .{t6});
+    std.log.warn("copy diff: {}", .{@intToFloat(f32, t5)/@intToFloat(f32, t6)});
 }
 
+pub inline fn copy(comptime T: type, dest: []T, source: []const T) void {
+    const n = 32; // TODO: Adjust based on bitSizeOf T
+    const V = @Vector(n, T);
+    if (source.len < n) return std.mem.copy(T, dest, source);
+    var end: usize = n;
+    while (end < source.len) {
+        const start = end - n;
+        const source_chunk: V = source[start..end][0..n].*;
+        const dest_chunk = &@as(V, dest[start..end][0..n].*);
+        dest_chunk.* = source_chunk;
+        end = std.math.min(end + n, source.len);
+    }
+}
 
-pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
+pub inline fn eql(comptime T: type, a: []const T, b: []const T) bool {
     const n = 32;
     const V8x32 = @Vector(n, T);
     if (a.len != b.len) return false;
@@ -79,17 +111,21 @@ pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
 }
 
 
-pub fn indexOfAnyPos(buf: []const u8, start_index: usize, delimiter: []const u8) ?usize {
+pub fn indexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?usize {
+    return indexOfAnyPos(T, buf, 0, delimiter);
+}
+
+pub fn indexOfAnyPos(comptime T: type, buf: []const T, start_index: usize, delimiter: []const T) ?usize {
     const n = 32;
     const k = delimiter.len;
-    const V8x32 = @Vector(n, u8);
+    const V8x32 = @Vector(n, T);
     const V1x32 = @Vector(n, u1);
     const Vbx32 = @Vector(n, bool);
     const first = @splat(n, delimiter[0]);
     const last = @splat(n, delimiter[k-1]);
 
     if (buf.len < n) {
-        return std.mem.indexOfAnyPos(u8, buf, start_index, delimiter);
+        return std.mem.indexOfAnyPos(T, buf, start_index, delimiter);
     }
 
     var end: usize = start_index + n;
@@ -104,7 +140,7 @@ pub fn indexOfAnyPos(buf: []const u8, start_index: usize, delimiter: []const u8)
         const mask = @bitCast(V1x32, first == first_chunk) & @bitCast(V1x32, last == last_chunk);
         if (@reduce(.Or, mask) != 0) {
             for (@as([n]bool, @bitCast(Vbx32, mask))) |match, i| {
-                if (match and std.mem.eql(u8, buf[start+i..start+i+k], delimiter)) {
+                if (match and eql(T, buf[start+i..start+i+k], delimiter)) {
                     return start+i;
                 }
             }
@@ -114,19 +150,19 @@ pub fn indexOfAnyPos(buf: []const u8, start_index: usize, delimiter: []const u8)
     return null; // Not found
 }
 
-pub const Splitter = struct {
-        index: ?usize,
+pub fn split(buffer: []const u8, delimiter: []const u8) SplitIterator {
+    return SplitIterator{.buffer=buffer, .delimiter=delimiter};
+}
+
+pub const SplitIterator = struct {
+        index: ?usize = 0,
         buffer: []const u8,
         delimiter: []const u8,
 
-    pub fn init(buf: []const u8, delimiter: []const u8) Splitter {
-        return Splitter{.buffer = buf, .index = 0, .delimiter=delimiter};
-    }
-
-        /// Returns a slice of the next field, or null if splitting is complete.
-    pub fn next(self: *Splitter) ?[]const u8 {
+    /// Returns a slice of the next field, or null if splitting is complete.
+    pub fn next(self: *SplitIterator) ?[]const u8 {
         const start = self.index orelse return null;
-        const end = if (indexOfAnyPos(self.buffer, start, self.delimiter)) |delim_start| blk: {
+        const end = if (indexOfAnyPos(u8, self.buffer, start, self.delimiter)) |delim_start| blk: {
             self.index = delim_start + self.delimiter.len;
             break :blk delim_start;
         } else blk: {
@@ -137,7 +173,7 @@ pub const Splitter = struct {
     }
 
     /// Returns a slice of the remaining bytes. Does not affect iterator state.
-    pub fn rest(self: Self) []const u8 {
+    pub fn rest(self: SplitIterator) []const u8 {
         const end = self.buffer.len;
         const start = self.index orelse end;
         return self.buffer[start..end];
