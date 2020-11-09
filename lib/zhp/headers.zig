@@ -231,7 +231,7 @@ pub const Headers = struct {
     /// Assumes the streams current buffer will exist for the lifetime
     /// of the headers.
     /// Note readbyteFast will not modify the buffer internal buffer
-    pub inline fn parse(self: *Headers, buf: *Bytes, stream: *IOStream, max_size: usize) !void {
+    pub fn parse(self: *Headers, buf: *Bytes, stream: *IOStream, max_size: usize) !void {
         // Reuse the request buffer for this
         var index: usize = undefined;
         var key: ?[]u8 = null;
@@ -259,10 +259,11 @@ pub const Headers = struct {
                     index = stream.readCount()-1;
 
                     // Read Key
-                    while (stream.readCount() < read_limit and ch != ':') {
+                    while (stream.readCount() < read_limit) {
                         // If we get a bad request here it's most likely because
                         // the client didn't send a \r\n after its last header
                         // TODO: Should this be allowed?
+                        if (ch == ':') break;
                         if (!util.isTokenChar(ch)) return error.BadRequest;
                         ch = try stream.readByteFast();
                     }

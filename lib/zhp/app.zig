@@ -610,6 +610,10 @@ pub const Application = struct {
 
         Application.instance = self;
         self.running = true;
+
+        var cleanup = async self.collector();
+        defer await cleanup;
+
         while (self.running) {
             // Grab a frame
             const lock = self.connection_pool.lock.acquire();
@@ -633,6 +637,7 @@ pub const Application = struct {
                 try server_conn.startRequestLoop(conn);
             }
         }
+
     }
 
     // ------------------------------------------------------------------------
@@ -686,6 +691,31 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------------
+
+    // Periodically go through the pools and cleanup
+    pub fn collector(self: *Application) void {
+        time.sleep(1*time.ns_per_s);
+        while (self.running) {
+            time.sleep(1*time.ns_per_s);
+
+            if (self.connection_pool.lock.tryAcquire()) |lock| {
+                defer lock.release();
+                if (self.connection_pool.free_objects.popOrNull()) |conn| {
+                    conn.deinit();
+                    self.connection_pool.allocator.destroy(conn);
+                }
+            }
+
+            if (self.request_pool.lock.tryAcquire()) |lock| {
+                defer lock.release();
+                if (self.request_pool.free_objects.popOrNull()) |req| {
+                    req.deinit();
+                    self.request_pool.allocator.destroy(req);
+                }
+            }
+        }
+    }
+
     pub fn closeAllConnections(self: *Application) void {
         const lock = self.connection_pool.lock.acquire();
         defer lock.release();
