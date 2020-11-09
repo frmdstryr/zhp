@@ -15,6 +15,7 @@ const util = web.util;
 const Request = web.Request;
 const Headers = web.Headers;
 
+const simd = @import("simd.zig");
 
 
 // Represents a file uploaded via a form.
@@ -100,7 +101,7 @@ pub const Form = struct {
 
         const separator = try std.fmt.bufPrint(&buf, "--{}\r\n", .{bounds});
 
-        var fields = mem.split(data[0..final_boundary_index.?], separator);
+        var fields = simd.split(data[0..final_boundary_index.?], separator);
 
         // TODO: Make these default capacities configurable
         var headers = try Headers.initCapacity(self.allocator, 2);

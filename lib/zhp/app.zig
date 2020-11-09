@@ -26,195 +26,79 @@ const IOStream = util.IOStream;
 const Middleware = web.middleware.Middleware;
 const handlers = web.handlers;
 
+const root = @import("root");
 
-pub const RequestHandler = struct {
-    const STACK_SIZE = 100*1024;
-
-    // Request handler signature
-    const HandlerFn = if (std.io.is_async)
-            fn(self: *RequestHandler) callconv(.Async) anyerror!void
-        else
-            fn(self: *RequestHandler) anyerror!void;
-    const StreamFn = if (std.io.is_async)
-            fn(self: *RequestHandler, io: *IOStream) callconv(.Async) anyerror!usize
-        else
-            fn(self: *RequestHandler, io: *IOStream) anyerror!usize;
-
-    application: *Application,
-    request: *Request,
-    response: *Response,
-    err: ?anyerror = null,
-
-    // Generic dispatch to handle
-    dispatch: HandlerFn = defaultDispatch,
-
-    // Default handlers
-    head: HandlerFn = defaultHandler,
-    get: HandlerFn = defaultHandler,
-    post: HandlerFn = defaultHandler,
-    delete: HandlerFn = defaultHandler,
-    patch: HandlerFn = defaultHandler,
-    put: HandlerFn = defaultHandler,
-    options: HandlerFn = defaultHandler,
-
-    // Write stream
-    stream: ?StreamFn = null,
-
-    // Read stream
-    upload: ?StreamFn = null,
-
-    // Execute the request handler by running the dispatch function
-    // By default the dispatch function calls the method matching
-    // the request method
-    pub fn execute(self: *RequestHandler) !void {
-        if (std.io.is_async) {
-            var stack_frame: [STACK_SIZE * 2]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, self.dispatch, .{self});
-        } else {
-            try self.dispatch(self);
-        }
-    }
-
-    // Dispatches to the other handlers based on the parsed request method
-    // This can be replaced with a custom handler if necessary
-    pub fn defaultDispatch(self: *RequestHandler) anyerror!void {
-        const handler: HandlerFn = switch (self.request.method) {
-            .Get => self.get,
-            .Put => self.put,
-            .Post => self.post,
-            .Patch => self.patch,
-            .Head => self.head,
-            .Delete => self.delete,
-            .Options => self.options,
-            else => RequestHandler.defaultHandler,
-        };
-        if (std.io.is_async) {
-            // Give a good chunk to the handler
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, handler, .{self});
-        } else {
-            return handler(self);
-        }
-    }
-
-    // Default handler request implementation
-    pub fn defaultHandler(self: *RequestHandler) anyerror!void {
-        self.response.status = web.responses.METHOD_NOT_ALLOWED;
-        return error.HttpError;
-    }
-
-    pub fn startStreaming(self: *RequestHandler, io: *IOStream) !usize {
-        if (self.stream) |stream_fn| {
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, stream_fn, .{self, io});
-        }
-        return error.ServerError; // Downlink stream handler not defined
-    }
-
-    pub fn startUpload(self: *RequestHandler, io: *IOStream) !void {
-        if (self.upload) |upload_fn| {
-            var stack_frame: [STACK_SIZE]u8 align(std.Target.stack_align) = undefined;
-            return await @asyncCall(&stack_frame, {}, upload_fn, .{self, io});
-        }
-        return error.ServerError; // Uplink stream handler not defined
-    }
-
-    pub fn deinit(self: *RequestHandler) void {
-        // The handler is created in a fixed buffer so we don't have
-        // to free anything here (for now)
-    }
-
-};
 
 // A handler is simply a a factory function which returns a RequestHandler
-pub const Handler = fn(app: *Application, request: *Request, response: *Response) anyerror!*RequestHandler;
-
+pub const Handler = if (std.io.is_async)
+        fn(app: *Application, server_request: *ServerRequest) callconv(.Async) anyerror!void
+    else
+        fn(app: *Application, server_request: *ServerRequest) anyerror!void;
 
 // A utility function so the user doesn't have to use @fieldParentPtr all the time
 // This seems a bit excessive...
 pub fn createHandler(comptime T: type) Handler {
-    const RequestDispatcher = struct {
-        const Self  = @This();
+    const RequestHandler = struct {
 
-        pub fn create(app: *Application, request: *Request, response: *Response) !*RequestHandler {
-            comptime const defaultDispatch = RequestHandler.defaultDispatch;
-            comptime const defaultHandler = RequestHandler.defaultHandler;
-            const self = try response.allocator.create(T);
-            self.* = T{
-                .handler = RequestHandler{
-                    .application = app,
-                    .request = request,
-                    .response = response,
-                    .dispatch = if (@hasDecl(T, "dispatch")) Self.dispatch else defaultDispatch,
-                    .head = if (@hasDecl(T, "head")) Self.head else defaultHandler,
-                    .get = if (@hasDecl(T, "get")) Self.get else defaultHandler,
-                    .post = if (@hasDecl(T, "post")) Self.post else defaultHandler,
-                    .delete = if (@hasDecl(T, "delete")) Self.delete else defaultHandler,
-                    .patch = if (@hasDecl(T, "patch")) Self.patch else defaultHandler,
-                    .put = if (@hasDecl(T, "put")) Self.put else defaultHandler,
-                    .options = if (@hasDecl(T, "options")) Self.options else defaultHandler,
-                    .stream = if (@hasDecl(T, "stream")) Self.stream else null,
+        pub fn execute(app: *Application, server_request: *ServerRequest) anyerror!void {
+            const request = &server_request.request;
+            const response = &server_request.response;
+            const io = server_request.stream;
+
+            switch (server_request.state) {
+                .Start => {
+                    const self = try response.allocator.create(T);
+                    self.* = T{};
+                    if (@bitSizeOf(T) > 0) {
+                        server_request.context = @ptrToInt(self);
+                    } else if (@hasDecl(T, "stream")) {
+                        // We need to be able to store the pointer
+                        @compileError("Stream handlers must contain context");
+                    }
+                    if (@hasField(T, "server_request")) {
+                        self.server_request = server_request;
+                    }
+                    //server_request.context = @ptrToInt(self);
+                    if (@hasDecl(T, "dispatch")) {
+                        return try self.dispatch(request, response);
+                    } else {
+                        inline for (std.meta.fields(Request.Method)) |f| {
+                            comptime const name = [_]u8{std.ascii.toLower(f.name[0])} ++ f.name[1..];
+                            if (@hasDecl(T, name)) {
+                                if (request.method == @intToEnum(Request.Method, f.value)) {
+                                    const handler = @field(self, name);
+                                    return try handler(request, response);
+                                }
+                            }
+                        }
+                        response.status = web.responses.METHOD_NOT_ALLOWED;
+                        return error.HttpError;
+                    }
                 },
-            };
-            return &self.handler;
-        }
+                .Finish => {
+                    if (@hasDecl(T, "stream")) {
+                        if (server_request.context) |addr| {
+                            const self = @intToPtr(*T, addr);
+                            _ = try self.stream(io.?);
+                        }
+                        return error.ServerError; // Something is missing here...
+                    }
+                }
 
-        pub fn dispatch(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.dispatch(req.request, req.response);
-        }
+            }
 
-        pub fn head(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.head(req.request, req.response);
-        }
-
-        pub fn get(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.get(req.request, req.response);
-        }
-
-        pub fn post(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.post(req.request, req.response);
-        }
-
-        pub fn delete(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.delete(req.request, req.response);
-        }
-
-        pub fn patch(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.patch(req.request, req.response);
-        }
-
-        pub fn put(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.put(req.request, req.response);
-        }
-
-        pub fn options(req: *RequestHandler) !void {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.options(req.request, req.response);
-        }
-
-        pub fn stream(req: *RequestHandler, io: *IOStream) !usize {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.stream(io);
-        }
-
-        pub fn upload(req: *RequestHandler, io: *IOStream) !usize {
-            const handler = @fieldParentPtr(T, "handler", req);
-            return handler.upload(io);
         }
     };
 
-    return RequestDispatcher.create;
+    return RequestHandler.execute;
 }
 
 
 pub const ServerRequest = struct {
+    pub const State = enum {
+        Start,
+        Finish
+    };
     allocator: *Allocator,
     application: *Application,
 
@@ -225,23 +109,26 @@ pub const ServerRequest = struct {
     // Request and response passed to the request handler
     request: Request,
     response: Response,
+    stream: ?*IOStream = null,
 
+    state: State = .Start,
+    context: ?usize = null,
     err: ?anyerror = null,
 
-    pub fn init(allocator: *Allocator, application: *Application) !ServerRequest {
+    pub fn init(allocator: *Allocator, app: *Application) !ServerRequest {
         return ServerRequest{
             .allocator = allocator,
-            .application = application,
+            .application = app,
             .storage = try allocator.alloc(
-                u8, application.options.handler_buffer_size),
+                u8, app.options.handler_buffer_size),
             .request = try Request.initCapacity(
                 allocator,
-                application.options.request_buffer_size,
-                application.options.max_header_count),
+                app.options.request_buffer_size,
+                app.options.max_header_count),
             .response = try Response.initCapacity(
                 allocator,
-                application.options.response_buffer_size,
-                application.options.response_header_count),
+                app.options.response_buffer_size,
+                app.options.response_header_count),
         };
     }
 
@@ -262,18 +149,20 @@ pub const ServerRequest = struct {
         self.request.reset();
         self.response.reset();
         self.err = null;
+        self.context = null;
+        self.state = .Start;
     }
 
     // Release this request back into the pool
     pub fn release(self: *ServerRequest) void {
-        //self.reset();
+        self.stream = null;
         const app = self.application;
         const lock = app.request_pool.lock.acquire();
+        defer lock.release();
         app.request_pool.release(self);
-        lock.release();
     }
 
-    pub fn deinit(self: *ServerConnection) void {
+    pub fn deinit(self: *ServerRequest) void {
         self.request.deinit();
         self.response.deinit();
         self.allocator.free(self.storage);
@@ -292,13 +181,12 @@ pub const ServerConnection = struct {
     io: IOStream = undefined,
     address: net.Address = undefined,
     frame: *Frame,
-    handler: ?*RequestHandler = null,
     // Outstanding requests
     //requests: RequestList,
 
-    pub fn init(allocator: *Allocator, application: *Application) !ServerConnection {
+    pub fn init(allocator: *Allocator, app: *Application) !ServerConnection {
         return ServerConnection{
-            .application = application,
+            .application = app,
             .io = try IOStream.initCapacity(allocator, null, 0, mem.page_size),
             .frame = try allocator.create(Frame),
         };
@@ -308,7 +196,7 @@ pub const ServerConnection = struct {
     pub fn startRequestLoop(self: *ServerConnection,
                             conn: net.StreamServer.Connection) !void {
         self.requestLoop(conn) catch |err| {
-            log.err("server error: {}", .{@errorName(err)});
+            log.err("unexpected error: {}", .{@errorName(err)});
         };
         //log.debug("Closed {}", .{conn});
     }
@@ -338,6 +226,7 @@ pub const ServerConnection = struct {
                 server_request.prepare();
             }
         }
+        server_request.stream = &self.io;
         defer server_request.release();
 
         const request = &server_request.request;
@@ -353,10 +242,6 @@ pub const ServerConnection = struct {
         // Start serving requests
         while (true) {
             defer server_request.reset();
-            defer if (self.handler) |handler| {
-                handler.deinit();
-                self.handler = null;
-            };
 
             // Parse the request line and headers
             request.stream = &self.io;
@@ -380,21 +265,11 @@ pub const ServerConnection = struct {
             // Get the function used to build the handler for the request
             // if this is null it means that handler should not be used
             // as one of the middleware handlers took care of it
-            const factoryFn = try app.processRequest(self, request, response);
-
-            // If we got a handler read the body and run it
-            if (server_request.err == null and factoryFn != null) {
-                const factory = factoryFn.?;
-                self.handler = try factory(app, request, response);
-
-                const handler = self.handler.?;
-
-                // Check if we got an error while reading the body
-                if (server_request.err == null) {
-                    handler.execute() catch |err| {
-                        server_request.err = err;
-                    };
-                }
+            const intercepted = try app.processRequest(server_request);
+            if (server_request.err == null and !intercepted) {
+                app.execute(server_request) catch |err| {
+                    server_request.err = err;
+                };
             }
 
             // If the request handler didn't read the body, do it now
@@ -409,10 +284,7 @@ pub const ServerConnection = struct {
             // If an error ocurred during parsing or running the handler
             // invoke the error handler
             if (server_request.err) |err| {
-                self.handler = try app.error_handler(app, request, response);
-                const err_handler = self.handler.?;
-                err_handler.err = err;
-                try err_handler.execute();
+                try app.error_handler(server_request);
 
                 switch (err) {
                     error.BrokenPipe, error.EndOfStream, error.ConnectionResetByPeer => {
@@ -434,11 +306,11 @@ pub const ServerConnection = struct {
             }
 
             // Let middleware process the response
-            try app.processResponse(self, request, response);
+            try app.processResponse(server_request);
 
             // Request handler already sent the response
             if (self.io.closed or response.finished) return;
-            try self.sendResponse(request, response);
+            try self.sendResponse(server_request);
 
             const keep_alive = self.canKeepAlive(request);
             if (self.io.closed or !keep_alive) return;
@@ -461,8 +333,9 @@ pub const ServerConnection = struct {
     }
 
     // Write the request
-    pub fn sendResponse(self: *ServerConnection, request: *Request,
-                        response: *Response) !void {
+    pub fn sendResponse(self: *ServerConnection, server_request: *ServerRequest) !void {
+        const request = &server_request.request;
+        const response = &server_request.response;
         const stream = &self.io.writer();
         const content_length = response.body.items.len;
 
@@ -512,6 +385,8 @@ pub const ServerConnection = struct {
         // End of headers
         _ = try stream.write("\r\n");
 
+        server_request.state = .Finish;
+
         // Write body
 //         if (response.chunking_output) {
 //             var start = 0;
@@ -521,11 +396,7 @@ pub const ServerConnection = struct {
 //         }
         var total_wrote: usize = 0;
         if (response.send_stream) {
-            if (self.handler) |handler| {
-                total_wrote += try handler.startStreaming(&self.io);
-            } else {
-                return error.ServerError; // Stream set but no stream fn!
-            }
+            try self.application.execute(server_request);
         } else if (response.body.items.len > 0) {
             try stream.writeAll(response.body.items);
             total_wrote += response.body.items.len;
@@ -572,6 +443,7 @@ pub const ServerConnection = struct {
 };
 
 
+
 pub const Route = struct {
     name: []const u8, // Reverse url name
     path: []const u8, // Path pattern
@@ -608,73 +480,28 @@ pub const Route = struct {
         }
         return mem.eql(u8, path, self.path);
     }
-};
-
-
-test "route-matches" {
-    const MainHandler = struct {handler: web.RequestHandler};
-    const r = Route.create("home", "/", MainHandler);
-    std.testing.expect(r.matches("/"));
-    std.testing.expect(!r.matches("/hello/"));
-}
-
-test "route-static" {
-    const r = Route.static("assets", "/assets/");
-    std.testing.expect(!r.matches("/"));
-    std.testing.expect(r.matches("/assets/img.jpg"));
-}
-
-
-pub const Router = struct {
-    routes: []Route,
 
     pub fn sortLongestPath(context: void, lhs: Route, rhs: Route) bool {
         return lhs.path.len > rhs.path.len;
     }
-
-    pub fn init(routes: []Route) Router {
-        std.sort.sort(Route, routes, {}, sortLongestPath);
-        return Router{
-            .routes = routes,
-        };
-    }
-    pub fn findHandler(self: *Router, request: *Request) !Handler {
-        for (self.routes) |route| {
-            if (route.matches(request.path)) {
-                //std.debug.warn("Route: name={} path={}\n", .{route.name, request.path});
-                return route.handler;
-            }
-        }
-        //std.debug.warn("Route: Not found for path={}\n", .{request.path});
-        return error.NotFound;
-    }
-
-    pub fn reverseUrl(self: *Router, name: []const u8, args: anytype) []const u8 {
-        for (self.routes) |route| {
-            if (mem.eql(u8, route.name, name)) {
-                return route.path;
-            }
-        }
-        return null;
-    }
-
 };
 
+// Sort routes
+pub fn sortedRoutes(comptime routes: []const Route) []const Route{
+    comptime var sorted_routes: [routes.len]Route = undefined;
+    for (routes) |r, i| {
+        sorted_routes[i] = r;
+    }
+    std.sort.sort(Route, sorted_routes[0..], {}, Route.sortLongestPath);
+    return sorted_routes[0..];
+}
 
 pub const Application = struct {
+
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
     pub const RequestPool = util.ObjectPool(ServerRequest);
 
-    // Global instance
-    pub var instance: ?*Application = null;
-
-    // ------------------------------------------------------------------------
-    // Server setup
-    // ------------------------------------------------------------------------
     pub const Options = struct {
-        // Routes
-        routes: []Route,
-        allocator: *Allocator,
         xheaders: bool = false,
         no_keep_alive: bool = false,
         protocol: []const u8 = "HTTP/1.1",
@@ -723,35 +550,42 @@ pub const Application = struct {
         debug: bool = false,
     };
 
+
+    pub const routes: []const Route = sortedRoutes(root.routes[0..]);
+    const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
+        root.error_handler else handlers.ServerErrorHandler);
+    const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))
+        root.not_found_handler else handlers.NotFoundHandler);
+
+//     const middleware: []*Middleware = if (@hasDecl(root, "middleware")) root.middleware
+//         else &[_]Middleware{};
+
+    pub var instance: ?*Application = null;
+
+    // ------------------------------------------------------------------------
+    // Server setup
+    // ------------------------------------------------------------------------
     allocator: *Allocator,
-    router: Router,
     server: net.StreamServer,
     connection_pool: ConnectionPool,
     request_pool: RequestPool,
-    middleware: std.ArrayList(*Middleware),
-    mimetypes: mimetypes.Registry,
-
-    // ------------------------------------------------------------------------
-    // Default handlers
-    // ------------------------------------------------------------------------
-    error_handler: Handler = createHandler(handlers.ServerErrorHandler),
-    not_found_handler: Handler = createHandler(handlers.NotFoundHandler),
+    running: bool = false,
     options: Options,
+    middleware: std.ArrayList(*Middleware),
+
 
     // ------------------------------------------------------------------------
     // Setup
     // ------------------------------------------------------------------------
-    pub fn init(options: Options) Application {
-        const allocator = options.allocator;
+    pub fn init(allocator: *Allocator, options: Options,) Application {
+        mimetypes.instance = mimetypes.Registry.init(allocator);
         return Application{
             .allocator = allocator,
-            .router = Router.init(options.routes),
             .options = options,
             .server = net.StreamServer.init(options.server_options),
-            .middleware = std.ArrayList(*Middleware).init(allocator),
             .connection_pool = ConnectionPool.init(allocator),
             .request_pool = RequestPool.init(allocator),
-            .mimetypes = mimetypes.Registry.init(allocator),
+            .middleware = std.ArrayList(*Middleware).init(allocator),
         };
     }
 
@@ -764,7 +598,7 @@ pub const Application = struct {
     // Start serving requests For each incoming connection.
     // The connections may be kept alive to handle more than one request.
     pub fn start(self: *Application) !void {
-        try self.mimetypes.load();
+        try mimetypes.instance.?.load();
 
         // Ignore sigpipe
         var act = os.Sigaction{
@@ -775,7 +609,8 @@ pub const Application = struct {
         os.sigaction(os.SIGPIPE, &act, null);
 
         Application.instance = self;
-        while (true) {
+        self.running = true;
+        while (self.running) {
             // Grab a frame
             const lock = self.connection_pool.lock.acquire();
                 var server_conn: *ServerConnection = undefined;
@@ -785,7 +620,7 @@ pub const Application = struct {
                     server_conn = try self.connection_pool.create();
                     server_conn.* = try ServerConnection.init(self.allocator, self);
                     //server_conn.server_request.prepare();
-               }
+            }
             lock.release();
 
             const conn = try self.server.accept();
@@ -803,40 +638,48 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Routing and Middleware
     // ------------------------------------------------------------------------
-    pub fn processRequest(self: *Application, server_conn: *ServerConnection,
-                          request: *Request, response: *Response) !?Handler {
+    pub fn processRequest(self: *Application, server_request: *ServerRequest) !bool {
+        const request = &server_request.request;
+        const response = &server_request.response;
 
         // Let middleware process the request
         // the request body has not yet been read at this point
         // if the middleware returns true the response is considered to be
         // handled and request processing stops here
-        for (self.middleware.items) |middleware| {
-            const done = try middleware.processRequest(request, response);
-            if (done) return null;
+        for (self.middleware.items) |m| {
+            const done = try m.processRequest(request, response);
+            if (done) return true;
         }
-
-        // Find the handler to perform this request
-        // if no handler is found the not_found_handler is used.
-        return self.router.findHandler(request) catch |err| {
-            if (err == error.NotFound) {
-                return self.not_found_handler;
-            } else {
-                return self.error_handler;
-            }
-        };
+        return false;
     }
 
-    pub fn processResponse(self: *Application, server_conn: *ServerConnection,
-                           request: *Request, response: *Response) !void {
+    pub fn execute(self: *Application, server_request: *ServerRequest) !void {
+        // Inline the routing to avoid using function pointers and async call
+        // which seems to have a pretty significant effect on speed
+        const path = server_request.request.path;
+        inline for (routes) |*route| {
+            if (route.matches(path)) {
+                //std.debug.warn("Route: name={} path={}\n", .{route.name, request.path});
+                try route.handler(self, server_request);
+                return;
+            }
+        }
+        try self.not_found_handler(server_request);
+    }
 
+    pub fn processResponse(self: *Application, server_request: *ServerRequest) !void {
+        const request = &server_request.request;
+        const response = &server_request.response;
         // Add server headers
         try response.headers.append("Server", "ZHP/0.1");
-        try response.headers.append("Date",
-            try Datetime.formatHttpFromTimestamp(
-                response.allocator, time.milliTimestamp()));
 
-        for (self.middleware.items) |middleware| {
-            try middleware.processResponse(request, response);
+        // TODO: This is really slow...
+        try response.headers.append("Date",
+             try Datetime.formatHttpFromTimestamp(
+                 response.allocator, time.milliTimestamp()));
+
+        for (self.middleware.items) |m| {
+            _ = try m.processResponse(request, response);
         }
     }
 
@@ -861,11 +704,9 @@ pub const Application = struct {
         self.server.deinit();
         self.connection_pool.deinit();
         self.request_pool.deinit();
-        self.middleware.deinit();
     }
 
 };
-
 
 test "app" {
     std.testing.refAllDecls(@This());

@@ -352,9 +352,11 @@ pub const Registry = struct {
 
 };
 
+pub var instance: ?Registry = null;
+
 
 test "guess-ext" {
-    var registry = Registry.init(std.heap.page_allocator);
+    var registry = Registry.init(std.testing.allocator);
     defer registry.deinit();
     try registry.load();
 
@@ -366,7 +368,7 @@ test "guess-ext" {
 }
 
 test "guess-ext-from-file" {
-    var registry = Registry.init(std.heap.page_allocator);
+    var registry = Registry.init(std.testing.allocator);
     defer registry.deinit();
     try registry.load();
 
@@ -377,7 +379,7 @@ test "guess-ext-from-file" {
 }
 
 test "guess-ext-unknown" {
-    var registry = Registry.init(std.heap.page_allocator);
+    var registry = Registry.init(std.testing.allocator);
     defer registry.deinit();
     try registry.load();
 

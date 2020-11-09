@@ -15,10 +15,11 @@ pub var default_stylesheet = @embedFile("templates/style.css");
 
 
 pub const ServerErrorHandler = struct {
-    handler: web.RequestHandler,
     const template = @embedFile("templates/error.html");
+    server_request: ?*web.ServerRequest = null,
     pub fn dispatch(self: *ServerErrorHandler, request: *web.Request,
                     response: *web.Response) anyerror!void {
+        const app = web.Application.instance.?;
         response.status = responses.INTERNAL_SERVER_ERROR;
 
         // Clear any existing data
@@ -30,13 +31,12 @@ pub const ServerErrorHandler = struct {
         comptime const end = start + key.len;
         //@breakpoint();
 
-
-        if (self.handler.application.options.debug) {
+        if (app.options.debug) {
             // Send it
             try response.stream.print(template[0..start], .{default_stylesheet});
 
             // Dump stack trace
-            if (self.handler.err) |err| {
+            if (self.server_request.?.err) |err| {
                 try response.stream.print("error: {}\n", .{@errorName(err)});
             }
             if (@errorReturnTrace()) |trace| {
@@ -71,7 +71,6 @@ pub const ServerErrorHandler = struct {
 };
 
 pub const NotFoundHandler = struct {
-    handler: web.RequestHandler,
     const template = @embedFile("templates/not-found.html");
     pub fn dispatch(self: *NotFoundHandler, request: *web.Request,
                     response: *web.Response) !void {
@@ -90,15 +89,16 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
     // TODO: Should the root be checked if it exists?
     return  struct {
         const Self = @This();
-        handler: web.RequestHandler,
+        //handler: web.RequestHandler,
         file: ?fs.File = null,
         start: usize = 0,
         end: usize = 0,
+        server_request: ?*web.ServerRequest = null,
 
         pub fn get(self: *Self, request: *web.Request,
                    response: *web.Response) !void {
             const allocator = response.allocator;
-            const mimetypes = &self.handler.application.mimetypes;
+            const mimetypes = &web.mimetypes.instance.?;
 
             // Determine path relative to the url root
             const rel_path = try fs.path.relative(
@@ -243,6 +243,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
         // Stream the file
         pub fn stream(self: *Self, io: *web.IOStream) !usize {
+            std.debug.assert(self.end > self.start);
             const total_wrote = self.end - self.start;
             var bytes_left: usize = total_wrote;
             if (self.file) |file| {
@@ -269,7 +270,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         }
 
         pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {
-            var handler = NotFoundHandler{.handler=self.handler};
+            var handler = NotFoundHandler{};
             try handler.dispatch(request, response);
         }
 

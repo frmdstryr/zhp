@@ -204,7 +204,7 @@ pub const IOStream = struct {
         self.unbuffered = unbuffered;
     }
 
-    pub fn shiftAndFillBuffer(self: *Self, start: usize) !usize {
+    pub inline fn shiftAndFillBuffer(self: *Self, start: usize) !usize {
         self.unbuffered = true;
         defer self.unbuffered = false;
 
@@ -308,7 +308,7 @@ pub const IOStream = struct {
     }
 
 
-    pub fn fillBuffer(self: *Self) !void {
+    pub inline fn fillBuffer(self: *Self) !void {
         const n = try self.readFn(self.in_buffer);
         if (n == 0) return error.EndOfStream;
         self._in_start_index = 0;

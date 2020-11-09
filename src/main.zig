@@ -9,8 +9,6 @@ const web = @import("zhp");
 pub const io_mode = .evented;
 
 const MainHandler = struct {
-    handler: web.RequestHandler,
-
     pub fn get(self: *MainHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "text/plain");
@@ -20,8 +18,8 @@ const MainHandler = struct {
 };
 
 const StreamHandler = struct {
-    handler: web.RequestHandler,
     const template = @embedFile("templates/stream.html");
+    allocator: ?*std.mem.Allocator = null,
 
     // Dump a random stream of crap
     pub fn get(self: *StreamHandler, request: *web.Request,
@@ -30,6 +28,7 @@ const StreamHandler = struct {
             try response.headers.append("Content-Type", "audio/mpeg");
             try response.headers.append("Cache-Control", "no-cache");
             response.send_stream = true;
+            self.allocator = response.allocator;
         } else {
             try response.stream.writeAll(template);
         }
@@ -46,7 +45,8 @@ const StreamHandler = struct {
 
     pub fn forward(self: *StreamHandler, io: *web.IOStream) !usize {
         const writer = io.writer();
-        const a = self.handler.response.allocator;
+        std.debug.assert(self.allocator != null);
+        const a = self.allocator.?;
         // http://streams.sevenfm.nl/live
 
         std.log.info("Connecting...", .{});
@@ -88,7 +88,6 @@ const StreamHandler = struct {
 
 
 const TemplateHandler = struct {
-    handler: web.RequestHandler,
     const template = @embedFile("templates/cover.html");
 
     pub fn get(self: *TemplateHandler, request: *web.Request,
@@ -100,8 +99,6 @@ const TemplateHandler = struct {
 };
 
 const JsonHandler = struct {
-    handler: web.RequestHandler,
-
     pub fn get(self: *JsonHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "application/json");
@@ -118,8 +115,6 @@ const JsonHandler = struct {
 };
 
 const ErrorTestHandler = struct {
-    handler: web.RequestHandler,
-
     pub fn get(self: *ErrorTestHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.stream.writeAll("Do some work");
@@ -130,7 +125,6 @@ const ErrorTestHandler = struct {
 
 
 const FormHandler = struct {
-    handler: web.RequestHandler,
     const template = @embedFile("templates/form.html");
     const key = "{% form %}";
     const start = std.mem.indexOf(u8, template, key).?;
@@ -138,7 +132,6 @@ const FormHandler = struct {
 
     pub fn get(self: *FormHandler, request: *web.Request, response: *web.Response) !void {
         // Split the template on the key
-
         const form =
         \\<form action="/form/" method="post" enctype="multipart/form-data">
             \\<input type="text" name="name" value="Your name"><br />
@@ -184,33 +177,27 @@ const FormHandler = struct {
     }
 };
 
+pub const routes = [_]web.Route{
+    web.Route.create("cover", "/", TemplateHandler),
+    web.Route.create("hello", "/hello", MainHandler),
+    web.Route.create("api", "/api/{d+}/", MainHandler),
+    web.Route.create("json", "/json/", JsonHandler),
+    web.Route.create("stream", "/stream/", StreamHandler),
+    web.Route.create("stream-media", "/stream/live/", StreamHandler),
+    web.Route.create("error", "/500/", ErrorTestHandler),
+    web.Route.create("form", "/form/", FormHandler),
+    web.Route.static("static", "/static/"),
+};
+
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!gpa.deinit());
     const allocator = &gpa.allocator;
 
-    const routes = &[_]web.Route{
-        web.Route.create("cover", "/", TemplateHandler),
-        web.Route.create("hello", "/hello", MainHandler),
-        web.Route.create("json", "/json/", JsonHandler),
-        web.Route.create("stream", "/stream/", StreamHandler),
-        web.Route.create("stream-media", "/stream/live/", StreamHandler),
-        web.Route.create("error", "/500/", ErrorTestHandler),
-        web.Route.create("form", "/form/", FormHandler),
-        web.Route.static("static", "/static/"),
-    };
+    var app = web.Application.init(allocator, .{.debug=true});
 
-    var app = web.Application.init(.{
-        .allocator=allocator,
-        .routes=routes[0..],
-        .debug=true,
-    });
-
-    // Logger
-    var logger = web.middleware.LoggingMiddleware{};
-
-    // Uncomment this if benchmarking
+    //var logger = web.middleware.LoggingMiddleware{};
     //try app.middleware.append(&logger.middleware);
 
     defer app.deinit();

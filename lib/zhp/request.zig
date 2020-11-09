@@ -19,7 +19,7 @@ const util = @import("util.zig");
 const Bytes = util.Bytes;
 const IOStream = util.IOStream;
 
-
+const simd = @import("simd.zig");
 
 pub const Request = struct {
     pub const Content = struct {
@@ -41,6 +41,7 @@ pub const Request = struct {
     };
 
     pub const Method = enum {
+        Unknown,
         Get,
         Put,
         Post,
@@ -48,20 +49,18 @@ pub const Request = struct {
         Head,
         Delete,
         Options,
-        Unknown,
-        Any,
     };
 
     pub const Version = enum {
+        Unknown,
         Http1_0,
         Http1_1,
-        Unknown
     };
 
     pub const Scheme = enum {
+        Unknown,
         Http,
         Https,
-        Unknown
     };
 
     // ------------------------------------------------------------------------
@@ -144,21 +143,49 @@ pub const Request = struct {
         // Want to dump directly into the request buffer
         self.buffer.expandToCapacity();
         stream.swapBuffer(self.buffer.items);
-        var start = stream.readCount();
 
         if (stream.amountBuffered() == 0) {
             try stream.fillBuffer();
         }
 
-        //std.log.debug(
-        //    \\
-        //    \\========== Buffer ==========
-        //    \\{}
-        //    \\==============================
-        //    , .{stream.readBuffered()});
+        var start = stream.readCount();
 
-        // TODO: This should retry if the error is EndOfBuffer which means
-        // it got a partial request
+//         std.log.debug(
+//            \\
+//            \\========== Buffer at {} ==========
+//            \\{}
+//            \\==============================
+//            , .{start, stream.readBuffered()});
+
+//         const end = simd.indexOfPos(u8, stream.in_buffer, start, "\r\n\r\n") orelse {
+//             return error.EndOfStream; // TODO: Need to read more
+//         };
+//         const head = self.buffer.items[start..end];
+//         if (head.len == 0) return error.EndOfStream;
+//         var it = simd.split(head, " ");
+//         const method = it.next().?;
+//         self.method = switch (method.len) {
+//             3 => switch (method[0]) {
+//                 'G' => Method.Get,
+//                 'P' => Method.Put,
+//                 else => return error.MethodNotAllowed,
+//             },
+//             4 => switch (method[0]) {
+//                 'P' => Method.Post,
+//                 'H' => Method.Head,
+//                 else => return error.MethodNotAllowed,
+//             },
+//             else => return error.MethodNotAllowed, // TODO
+//         };
+//         self.path = it.next() orelse return error.BadRequest;
+//         self.version = if (it.next()) |v| .Http1_1 else return error.BadRequest;
+//         try self.headers.append("Connection", "keep-alive");
+//         self.read_finished = true;
+//
+//         self.head = head;
+//         const n = stream.consumeBuffered(self.head.len);
+//         return n;
+
         while (true) {
             return self.parseNoSwap(stream, options) catch |err| switch (err) {
                 error.EndOfBuffer => {

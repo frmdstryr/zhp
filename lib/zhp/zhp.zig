@@ -20,7 +20,7 @@ pub const Middleware = middleware.Middleware;
 pub const app = @import("app.zig");
 pub const Route = app.Route;
 pub const Router = app.Router;
-pub const RequestHandler = app.RequestHandler;
+pub const ServerRequest = app.ServerRequest;
 pub const Application = app.Application;
 
 
