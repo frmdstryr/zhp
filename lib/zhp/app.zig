@@ -610,7 +610,12 @@ pub const Application = struct {
         self.running = true;
 
         var background = async self.backgroundLoop();
-        defer await background;
+
+        // Make sure the background task stops if an error occurs
+        defer {
+            self.running = false;
+            await background;
+        }
 
         while (self.running) {
             // Grab a frame
