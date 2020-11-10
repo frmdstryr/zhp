@@ -142,7 +142,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             // NOTE: The modified result doesn't need freed since the response handles that
             var buf = try response.allocator.alloc(u8, 32);
             try response.headers.append("Last-Modified",
-                try modified.formatHttp(buf));
+                try modified.formatHttpBuf(buf));
 
             // TODO: cache control
 
