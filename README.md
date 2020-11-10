@@ -28,13 +28,11 @@ To make and deploy your own app see:
 
 ```zig
 const std = @import("std");
-const web = @import("zhp").web;
+const web = @import("zhp");
 
 pub const io_mode = .evented;
 
 const MainHandler = struct {
-    handler: web.RequestHandler,
-
     pub fn get(self: *MainHandler, request: *web.Request, response: *web.Response) !void {
         try response.headers.put("Content-Type", "text/plain");
         try response.stream.write("Hello, World!");
@@ -42,15 +40,20 @@ const MainHandler = struct {
 
 };
 
+const routes = [_]web.Route{
+    web.Route.create("home", "/", MainHandler),
+};
 
 pub fn main() anyerror!void {
-    const routes = [_]web.Route{
-        web.Route.create("home", "/", MainHandler),
-    };
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(!gpa.deinit());
+    const allocator = &gpa.allocator;
 
-    var app = web.Application.init(.{
-        .routes=routes[0..],
-    });
+    var app = web.Application.init(allocator, .{.debug=true});
+
+    var logger = web.middleware.LoggingMiddleware{};
+    try app.middleware.append(&logger.middleware);
+
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
     try app.start();
