@@ -1139,8 +1139,8 @@ pub const Datetime = struct {
 
     // Formats a timestamp in the format used by HTTP.
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
-    pub fn formatHttp(self: *Datetime, allocator: *std.mem.Allocator) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, "{}, {} {} {} {d:0>2}:{d:0>2}:{d:0>2} {}", .{
+    pub fn formatHttp(self: *Datetime, buf: []u8) ![]const u8 {
+        return try std.fmt.bufPrint(buf, "{}, {} {} {} {d:0>2}:{d:0>2}:{d:0>2} {}", .{
             self.date.weekdayName()[0..3],
             self.date.day,
             self.date.monthName()[0..3],
@@ -1154,14 +1154,14 @@ pub const Datetime = struct {
 
     // Formats a timestamp in the format used by HTTP.
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
-    pub fn formatHttpFromTimestamp(allocator: *std.mem.Allocator, timestamp: i64) ![]const u8 {
-        return Datetime.fromTimestamp(timestamp).formatHttp(allocator);
+    pub fn formatHttpFromTimestamp(buf: []u8, timestamp: i64) ![]const u8 {
+        return Datetime.fromTimestamp(timestamp).formatHttp(buf);
     }
 
     // From time in nanoseconds
-    pub fn formatHttpFromModifiedDate(allocator: *std.mem.Allocator, mtime: i128) ![]const u8 {
+    pub fn formatHttpFromModifiedDate(buf: []u8, mtime: i128) ![]const u8 {
         const ts = @intCast(i64, @divFloor(mtime, time.ns_per_ms));
-        return Datetime.formatHttpFromTimestamp(allocator, ts);
+        return Datetime.formatHttpFromTimestamp(buf, ts);
     }
 
     // ------------------------------------------------------------------------
@@ -1302,16 +1302,14 @@ test "datetime-parse-modified-since" {
 }
 
 test "file-modified-date" {
-    const allocator = std.testing.allocator;
     var f = try std.fs.cwd().openFile("lib/zhp/time/datetime.zig", .{});
     var stat = try f.stat();
-    var str = try Datetime.formatHttpFromModifiedDate(allocator, stat.mtime);
-    defer allocator.free(str);
+    var buf: [32]usize = 0;
+    var str = try Datetime.formatHttpFromModifiedDate(buf, stat.mtime);
     std.debug.warn("Modtime: {}\n", .{str});
 }
 
 test "readme-example" {
-    const allocator = std.testing.allocator;
     var date = try Date.create(2019, 12, 25);
     var next_year = date.shiftDays(7);
     assert(next_year.year == 2020);
@@ -1320,8 +1318,8 @@ test "readme-example" {
 
     // In UTC
     var now = Datetime.now();
-    var now_str = try now.formatHttp(allocator);
-    defer allocator.free(now_str);
+    var buf: [32]usize = 0;
+    var now_str = try now.formatHttp(buf);
     std.debug.warn("The time is now: {}\n", .{now_str});
     // The time is now: Fri, 20 Dec 2019 22:03:02 UTC
 

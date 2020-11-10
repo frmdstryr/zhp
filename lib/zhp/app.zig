@@ -43,7 +43,6 @@ pub fn createHandler(comptime T: type) Handler {
         pub fn execute(app: *Application, server_request: *ServerRequest) anyerror!void {
             const request = &server_request.request;
             const response = &server_request.response;
-            const io = server_request.stream;
 
             switch (server_request.state) {
                 .Start => {
@@ -58,7 +57,6 @@ pub fn createHandler(comptime T: type) Handler {
                     if (@hasField(T, "server_request")) {
                         self.server_request = server_request;
                     }
-                    //server_request.context = @ptrToInt(self);
                     if (@hasDecl(T, "dispatch")) {
                         return try self.dispatch(request, response);
                     } else {
@@ -72,14 +70,15 @@ pub fn createHandler(comptime T: type) Handler {
                             }
                         }
                         response.status = web.responses.METHOD_NOT_ALLOWED;
-                        return error.HttpError;
+                        return;
                     }
                 },
                 .Finish => {
                     if (@hasDecl(T, "stream")) {
                         if (server_request.context) |addr| {
                             const self = @intToPtr(*T, addr);
-                            _ = try self.stream(io.?);
+                            _ = try self.stream(server_request.stream.?);
+                            return;
                         }
                         return error.ServerError; // Something is missing here...
                     }
@@ -318,9 +317,6 @@ pub const ServerConnection = struct {
     }
 
     fn canKeepAlive(self: *ServerConnection, request: *Request) bool {
-        if (self.application.options.no_keep_alive) {
-            return false;
-        }
         const headers = &request.headers;
         if (request.version == .Http1_1) {
             return !headers.eqlIgnoreCase("Connection", "close");
@@ -338,28 +334,6 @@ pub const ServerConnection = struct {
         const response = &server_request.response;
         const stream = &self.io.writer();
         const content_length = response.body.items.len;
-
-        if (response.status.code == 204) {
-            // This response code is not allowed to have a non-empty body,
-            // and has an implicit length of zero instead of read-until-close.
-            // http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.3
-            if (content_length != 0 or response.headers.contains("Transfer-Encoding")) {
-                log.warn("Response with code 204 should not have a body", .{});
-                return error.ServerError;
-            }
-        }
-
-        // Finalize any headers
-        if (request.version == .Http1_1 and response.disconnect_on_finish) {
-            try response.headers.append("Connection", "close");
-        } else if (request.version == .Http1_0
-                and request.headers.eqlIgnoreCase("Connection", "keep-alive")) {
-            try response.headers.append("Connection", "keep-alive");
-        }
-
-        if (response.chunking_output) {
-            try response.headers.append("Transfer-Encoding", "chunked");
-        }
 
         // Write status line
         try stream.print("HTTP/1.1 {} {}\r\n", .{
@@ -412,7 +386,6 @@ pub const ServerConnection = struct {
                 .{total_wrote, content_length});
             return error.ServerError;
         }
-
 
         // Finish
         // If the app finished the request while we're still reading,
@@ -496,6 +469,31 @@ pub fn sortedRoutes(comptime routes: []const Route) []const Route{
     return sorted_routes[0..];
 }
 
+pub const Clock = struct {
+    buffer: [32]u8 = undefined,
+    last_updated: i64 = 0,
+    lock: std.Mutex = std.Mutex{},
+    value: []const u8 = "",
+
+    pub fn get(self: *Clock) []const u8 {
+        var lock = self.lock.acquire();
+        defer lock.release();
+        return self.value;
+    }
+
+    pub fn update(self: *Clock) void {
+        const t = time.milliTimestamp();
+        if (t - self.last_updated > 1000) {
+            var lock = self.lock.acquire();
+            defer lock.release();
+            self.value = Datetime.formatHttpFromTimestamp(
+                &self.buffer, t) catch unreachable;
+            self.last_updated = t;
+        }
+    }
+
+};
+
 pub const Application = struct {
 
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
@@ -503,7 +501,6 @@ pub const Application = struct {
 
     pub const Options = struct {
         xheaders: bool = false,
-        no_keep_alive: bool = false,
         protocol: []const u8 = "HTTP/1.1",
         decompress_request: bool = false,
         chunk_size: u32 = 65536,
@@ -572,7 +569,7 @@ pub const Application = struct {
     running: bool = false,
     options: Options,
     middleware: std.ArrayList(*Middleware),
-
+    clock: Clock = Clock{},
 
     // ------------------------------------------------------------------------
     // Setup
@@ -599,6 +596,7 @@ pub const Application = struct {
     // The connections may be kept alive to handle more than one request.
     pub fn start(self: *Application) !void {
         try mimetypes.instance.?.load();
+        self.clock.update();
 
         // Ignore sigpipe
         var act = os.Sigaction{
@@ -611,8 +609,8 @@ pub const Application = struct {
         Application.instance = self;
         self.running = true;
 
-        var cleanup = async self.collector();
-        defer await cleanup;
+        var background = async self.backgroundLoop();
+        defer await background;
 
         while (self.running) {
             // Grab a frame
@@ -675,13 +673,11 @@ pub const Application = struct {
     pub fn processResponse(self: *Application, server_request: *ServerRequest) !void {
         const request = &server_request.request;
         const response = &server_request.response;
+
         // Add server headers
         try response.headers.append("Server", "ZHP/0.1");
-
-        // TODO: This is really slow...
-        try response.headers.append("Date",
-             try Datetime.formatHttpFromTimestamp(
-                 response.allocator, time.milliTimestamp()));
+        // TODO: Does this need to use the lock
+        try response.headers.append("Date", self.clock.value);
 
         for (self.middleware.items) |m| {
             _ = try m.processResponse(request, response);
@@ -693,10 +689,10 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
 
     // Periodically go through the pools and cleanup
-    pub fn collector(self: *Application) void {
-        time.sleep(1*time.ns_per_s);
+    pub fn backgroundLoop(self: *Application) void {
         while (self.running) {
             time.sleep(1*time.ns_per_s);
+            self.clock.update();
 
             if (self.connection_pool.lock.tryAcquire()) |lock| {
                 defer lock.release();

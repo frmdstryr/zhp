@@ -241,11 +241,11 @@ pub const Headers = struct {
         // Strip any whitespace
         while (self.headers.items.len < self.headers.capacity) {
             // TODO: This assumes that the whole header in the buffer
-            var ch = try stream.readByteFast();
+            var ch = try stream.readByteSafe();
 
             switch (ch) {
                 '\r' => {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != '\n') return error.BadRequest;
                     break; // Empty line, we're done
                 },
@@ -265,7 +265,7 @@ pub const Headers = struct {
                         // TODO: Should this be allowed?
                         if (ch == ':') break;
                         if (!util.isTokenChar(ch)) return error.BadRequest;
-                        ch = try stream.readByteFast();
+                        ch = try stream.readByteSafe();
                     }
 
                     // Header name
@@ -273,7 +273,7 @@ pub const Headers = struct {
 
                     // Strip whitespace
                     while (stream.readCount() < read_limit) {
-                        ch = try stream.readByteFast();
+                        ch = try stream.readByteSafe();
                         if (!(ch == ' ' or ch == '\t')) break;
                     }
                 },
@@ -283,7 +283,7 @@ pub const Headers = struct {
             index = stream.readCount()-1;
             while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
             }
 
             // TODO: Strip trailing spaces and tabs?
@@ -292,12 +292,12 @@ pub const Headers = struct {
             // Ignore any remaining non-print characters
             while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
             }
 
             // Check CRLF
             if (ch == '\r') {
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
             }
             if (ch != '\n') return error.BadRequest;
 

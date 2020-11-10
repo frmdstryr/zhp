@@ -330,13 +330,16 @@ pub const IOStream = struct {
         return c;
     }
 
-    pub inline fn readByteFast(self: *Self) !u8 {
+    pub inline fn readByteSafe(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
             return error.EndOfBuffer;
         }
+        return self.readByteUnsafe();
+    }
+
+    pub inline fn readByteUnsafe(self: *Self) u8 {
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
-        //self._in_count += 1;
         return c;
     }
 
@@ -358,11 +361,11 @@ pub const IOStream = struct {
             self.out_buffer[self._out_index] = bytes[0];
             self._out_index += 1;
             if (self._out_index == self.out_buffer.len) {
-                try self.flushFn();
+                try self.flush();
             }
             return @as(usize, 1);
         } else if (bytes.len >= self.out_buffer.len) {
-            try self.flushFn();
+            try self.flush();
             return self.out_file.write(bytes);
         }
         var src_index: usize = 0;
@@ -374,25 +377,16 @@ pub const IOStream = struct {
             self._out_index += copy_amt;
             assert(self._out_index <= self.out_buffer.len);
             if (self._out_index == self.out_buffer.len) {
-                try self.flushFn();
+                try self.flush();
             }
             src_index += copy_amt;
         }
         return src_index;
     }
 
-    fn flushFn(self: *Self) !void {
+    pub fn flush(self: *Self) !void {
         try self.out_file.writeAll(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
-    }
-
-    pub fn flush(self: *Self) !void {
-        if (comptime std.io.is_async) {
-            var f = async self.flushFn();
-            return await f;
-        } else {
-            return self.flushFn();
-        }
     }
 
     // Flush 'size' bytes from the start of the buffer out the stream

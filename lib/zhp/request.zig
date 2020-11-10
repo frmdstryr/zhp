@@ -150,41 +150,13 @@ pub const Request = struct {
 
         var start = stream.readCount();
 
-//         std.log.debug(
+//         std.log.warn(
 //            \\
 //            \\========== Buffer at {} ==========
 //            \\{}
 //            \\==============================
 //            , .{start, stream.readBuffered()});
-
-//         const end = simd.indexOfPos(u8, stream.in_buffer, start, "\r\n\r\n") orelse {
-//             return error.EndOfStream; // TODO: Need to read more
-//         };
-//         const head = self.buffer.items[start..end];
-//         if (head.len == 0) return error.EndOfStream;
-//         var it = simd.split(head, " ");
-//         const method = it.next().?;
-//         self.method = switch (method.len) {
-//             3 => switch (method[0]) {
-//                 'G' => Method.Get,
-//                 'P' => Method.Put,
-//                 else => return error.MethodNotAllowed,
-//             },
-//             4 => switch (method[0]) {
-//                 'P' => Method.Post,
-//                 'H' => Method.Head,
-//                 else => return error.MethodNotAllowed,
-//             },
-//             else => return error.MethodNotAllowed, // TODO
-//         };
-//         self.path = it.next() orelse return error.BadRequest;
-//         self.version = if (it.next()) |v| .Http1_1 else return error.BadRequest;
-//         try self.headers.append("Connection", "keep-alive");
-//         self.read_finished = true;
 //
-//         self.head = head;
-//         const n = stream.consumeBuffered(self.head.len);
-//         return n;
 
         while (true) {
             return self.parseNoSwap(stream, options) catch |err| switch (err) {
@@ -225,19 +197,19 @@ pub const Request = struct {
 
         // FIXME: If the whole method is not in the initial read
         // buffer this bails out
-        var ch: u8 = try stream.readByteFast();
+        var ch: u8 = try stream.readByteSafe();
 
         // Skip any leading CRLFs
         while (stream.readCount() < read_limit) {
             switch (ch) {
                 '\r' => {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != '\n') return error.BadRequest;
                 },
                 '\n' => {},
                 else => break,
             }
-            ch = try stream.readByteFast();
+            ch = try stream.readByteSafe();
         }
         if (stream.readCount() >= read_limit) {
             return error.RequestUriTooLong; // Too Big
@@ -247,29 +219,29 @@ pub const Request = struct {
         switch (ch) {
             'G' => { // GET
                 inline for("ET") |expected| {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Get;
             },
             'P' => {
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
                 switch (ch) {
                     'U' => {
-                        ch = try stream.readByteFast();
+                        ch = try stream.readByteSafe();
                         if (ch != 'T') return error.MethodNotAllowed;
                         self.method = Method.Put;
                     },
                     'O' => {
                         inline for("ST") |expected| {
-                            ch = try stream.readByteFast();
+                            ch = try stream.readByteSafe();
                             if (ch != expected) return error.MethodNotAllowed;
                         }
                         self.method = Method.Post;
                     },
                     'A' => {
                         inline for("TCH") |expected| {
-                            ch = try stream.readByteFast();
+                            ch = try stream.readByteSafe();
                             if (ch != expected) return error.MethodNotAllowed;
                         }
                         self.method = Method.Patch;
@@ -279,21 +251,21 @@ pub const Request = struct {
             },
             'H' => {
                 inline for("EAD") |expected| {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Head;
             },
             'D' => {
                 inline for("ELETE") |expected| {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Delete;
             },
             'O' => {
                 inline for("PTIONS") |expected| {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != expected) return error.MethodNotAllowed;
                 }
                 self.method = Method.Options;
@@ -303,7 +275,7 @@ pub const Request = struct {
         }
 
         // Check separator
-        ch = try stream.readByteFast();
+        ch = try stream.readByteSafe();
         if (ch != ' ') return error.BadRequest;
 
         // Parse Uri
@@ -311,10 +283,10 @@ pub const Request = struct {
 
         // Read version
         inline for("HTTP/1.") |expected| {
-            ch = try stream.readByteFast();
+            ch = try stream.readByteSafe();
             if (ch != expected) return error.BadRequest;
         }
-        ch = try stream.readByteFast();
+        ch = try stream.readByteSafe();
         self.version = switch (ch) {
             '0' => Version.Http1_0,
             '1' => Version.Http1_1,
@@ -322,10 +294,10 @@ pub const Request = struct {
         };
 
         // Read to end of the line
-        ch = try stream.readByteFast();
+        ch = try stream.readByteSafe();
 
         if (ch == '\r') {
-            ch = try stream.readByteFast();
+            ch = try stream.readByteSafe();
         }
         if (ch != '\n') return error.BadRequest;
     }
@@ -337,27 +309,27 @@ pub const Request = struct {
         const index = stream.readCount();
         const read_limit = max_size + stream.readCount();
 
-        var ch = try stream.readByteFast();
+        var ch = try stream.readByteSafe();
         switch (ch) {
             '/' => {},
             'h', 'H' => {
                 // A complete URL, known as the absolute form
                 inline for("ttp") |expected| {
-                    ch = ascii.toLower(try stream.readByteFast());
+                    ch = ascii.toLower(try stream.readByteSafe());
                     if (ch != expected) return error.BadRequest;
                 }
 
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
                 if (ch == 's' or ch == 'S') {
                     self.scheme = .Https;
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                 } else {
                     self.scheme = .Http;
                 }
                 if (ch != ':') return error.BadRequest;
 
                 inline for("//") |expected| {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (ch != expected) return error.BadRequest;
                 }
 
@@ -365,7 +337,7 @@ pub const Request = struct {
                 // TODO: This does not support the ip address format
                 const host_start = stream.readCount();
                 while (stream.readCount() < read_limit) {
-                    ch = try stream.readByteFast();
+                    ch = try stream.readByteSafe();
                     if (!ascii.isAlNum(ch) and ch != '.' and ch != '-') break;
 
                 }
@@ -377,16 +349,17 @@ pub const Request = struct {
                     // Read port, can be at most 5 digits (65535) so we
                     // want to read at least 6 bytes to ensure we catch the /
                     inline for("012345") |i| {
-                        ch = try stream.readByteFast();
+                        ch = try stream.readByteSafe();
                         if (!ascii.isDigit(ch)) break;
                     }
+                    if (ch != '/') return error.BadRequest;
                 }
                 self.host = buf[host_start..stream.readCount()-1];
             },
             '*' => {
                 // The asterisk form, a simple asterisk ('*') is used with
                 // OPTIONS, representing the server as a whole.
-                ch = try stream.readByteFast();
+                ch = try stream.readByteSafe();
                 if (ch != ' ') return error.BadRequest;
                 self.uri = buf[index..stream.readCount()];
                 return;
@@ -407,7 +380,7 @@ pub const Request = struct {
         var query_start: ?usize = null;
 
         while (stream.readCount() < read_limit) {
-            const ch = try stream.readByteFast();
+            const ch = try stream.readByteSafe();
             if (!ascii.isGraph(ch)) {
                 if (ch == ' ') break;
                 return error.BadRequest;
