@@ -34,14 +34,6 @@ const HTTPs1p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '1', '.', '0'});
 const HTTPs2p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '2', '.', '0'});
 const HTTPs3p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '3', '.', '0'});
 
-const POST_ = @bitCast(u64, [8]u8{'P', 'O', 'S', 'T', ' ', 0, 0, 0});
-const HEAD_ = @bitCast(u64, [8]u8{'H', 'E', 'A', 'D', ' ', 0, 0, 0});
-const PATCH_ = @bitCast(u64, [8]u8{'P', 'A', 'T', 'C', 'H', ' ', 0, 0});
-const DELETE_ = @bitCast(u64, [8]u8{'D', 'E', 'L', 'E', 'T', 'E', ' ', 0});
-const OPTIONS_ = @bitCast(u64, [8]u8{'O', 'P', 'T', 'I', 'O', 'N', 'S', ' '});
-
-
-
 
 pub const Request = struct {
     pub const Content = struct {
@@ -202,9 +194,8 @@ pub const Request = struct {
     inline fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
         const start = stream.readCount();
 
-        // FIXME make these configurable
         try self.parseRequestLine(stream, options.max_request_line_size);
-        try self.parseHeaders(stream, options.max_header_size);
+        try self.headers.parse(&self.buffer, stream, options.max_header_size);
         try self.parseContentLength(options.max_content_length);
 
         const end = stream.readCount();
@@ -213,7 +204,7 @@ pub const Request = struct {
     }
 
     pub inline fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
-        if (stream.isEmpty()) return error.EndOfStream;
+        if (stream.isEmpty()) return error.EndOfBuffer;
 
         var ch: u8 = stream.lastByte();
         switch (ch) {
@@ -246,10 +237,9 @@ pub const Request = struct {
     }
 
     inline fn parseMethod(self: *Request, stream: *IOStream) !void {
-        @setRuntimeSafety(false);
+        @setRuntimeSafety(false); // Checked below
         const buf = stream.readBuffered();
-        // We can check for 8 here because we know the version must exist
-        if (buf.len < 8) return error.BadRequest;
+        if (buf.len < 8) return error.EndOfBuffer;
         const v = @bitCast(u32, buf[0..4].*);
         stream.skipBytes(4);
         switch (v) {
@@ -288,9 +278,9 @@ pub const Request = struct {
     }
 
     pub inline fn parseVersion(self: *Request, stream: *IOStream) !void {
-        @setRuntimeSafety(false);
+        @setRuntimeSafety(false); // Checked below
         const buf = stream.readBuffered();
-        if (buf.len < 8) return error.BadRequest;
+        if (buf.len < 8) return error.EndOfBuffer;
         stream.skipBytes(8);
         self.version = switch (@bitCast(u64, buf[0..8].*)) {
             HTTPs1p0 => .Http1_0,
@@ -304,31 +294,35 @@ pub const Request = struct {
     // Parse the url, this populates, the uri, host, scheme, and query
     // when available. The trailing space is consumed.
     pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
+        //@setRuntimeSafety(false); // We already check it
         const buf = self.buffer.items;
         const index = stream.readCount();
         const read_limit = max_size + stream.readCount();
 
-        var ch = try stream.readByteSafe();
+        // Bounds check, Must have "/ HTTP/x.x\n\n"
+        if (stream.amountBuffered() < 12) return error.EndOfBuffer;
+
+        var ch = stream.readByteUnsafe();
         switch (ch) {
             '/' => {},
             'h', 'H' => {
                 // A complete URL, known as the absolute form
                 inline for("ttp") |expected| {
-                    ch = ascii.toLower(try stream.readByteSafe());
+                    ch = ascii.toLower(stream.readByteUnsafe());
                     if (ch != expected) return error.BadRequest;
                 }
 
-                ch = try stream.readByteSafe();
+                ch = stream.readByteUnsafe();
                 if (ch == 's' or ch == 'S') {
                     self.scheme = .Https;
-                    ch = try stream.readByteSafe();
+                    ch = stream.readByteUnsafe();
                 } else {
                     self.scheme = .Http;
                 }
                 if (ch != ':') return error.BadRequest;
 
                 inline for("//") |expected| {
-                    ch = try stream.readByteSafe();
+                    ch = stream.readByteUnsafe();
                     if (ch != expected) return error.BadRequest;
                 }
 
@@ -341,6 +335,7 @@ pub const Request = struct {
 
                 }
                 if (stream.readCount() >= read_limit) {
+                    if (stream.isEmpty()) return error.EndOfBuffer;
                     return error.RequestUriTooLong; // Too Big
                 }
 
@@ -351,14 +346,14 @@ pub const Request = struct {
                         ch = try stream.readByteSafe();
                         if (!ascii.isDigit(ch)) break;
                     }
-                    if (ch != '/') return error.BadRequest;
                 }
+                if (ch != '/') return error.BadRequest;
                 self.host = buf[host_start..stream.readCount()-1];
             },
             '*' => {
                 // The asterisk form, a simple asterisk ('*') is used with
                 // OPTIONS, representing the server as a whole.
-                ch = try stream.readByteSafe();
+                ch = stream.readByteUnsafe();
                 if (ch != ' ') return error.BadRequest;
                 self.uri = buf[index..stream.readCount()];
                 return;
@@ -367,19 +362,20 @@ pub const Request = struct {
             else => return error.BadRequest,
         }
 
-        if (ch != '/') return error.BadRequest;
         const end = try self.parseUriPath(stream, max_size);
         self.uri = buf[index..end];
     }
 
     pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
+        //@setRuntimeSafety(false);
         const buf = self.buffer.items;
         const index = stream.readCount()-1;
-        const read_limit = max_size + stream.readCount();
-        var query_start: ?usize = null;
+        const limit = std.math.min(max_size, stream.amountBuffered());
+        const read_limit = limit + stream.readCount();
 
+        var query_start: ?usize = null;
         while (stream.readCount() < read_limit) {
-            const ch = try stream.readByteSafe();
+            const ch = stream.readByteUnsafe();
             if (!ascii.isGraph(ch)) {
                 if (ch == ' ') break;
                 return error.BadRequest;
@@ -389,6 +385,7 @@ pub const Request = struct {
             }
         }
         if (stream.readCount() >= read_limit) {
+            if (stream.isEmpty()) return error.EndOfBuffer;
             return error.RequestUriTooLong; // Too Big
         }
 
@@ -400,10 +397,6 @@ pub const Request = struct {
             self.path = buf[index..end];
         }
         return end;
-    }
-
-    pub inline fn parseHeaders(self: *Request, stream: *IOStream, max_size: usize) !void {
-        try self.headers.parse(&self.buffer, stream, max_size);
     }
 
     pub inline fn parseContentLength(self: *Request, max_size: usize) !void {
