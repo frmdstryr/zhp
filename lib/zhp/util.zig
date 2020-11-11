@@ -133,18 +133,6 @@ pub const IOStream = struct {
         self._in_end_index = in_buffer.len;
     }
 
-    // Reset the stream to the "unread" state for testing
-    pub fn startTest(self: *Self) void {
-        //if (!builtin.is_test) @compileError("This is for testing only");
-        self._in_start_index = 0;
-        self._in_end_index = self.in_buffer.len;
-        self._in_count = 0;
-        self.closed = false;
-        self.unbuffered = false;
-        //if (buffer.len == 0) return error.EndOfStream;
-        return;
-    }
-
     // ------------------------------------------------------------------------
     // Custom Stream API
     // ------------------------------------------------------------------------

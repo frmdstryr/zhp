@@ -629,7 +629,6 @@ test "01-parse-request-line" {
     const allocator = &fba.allocator;
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
-    stream.startTest();
     _ = try request.parseTest(&stream);
 
     testing.expectEqual(request.method, Request.Method.Get);
@@ -639,7 +638,6 @@ test "01-parse-request-line" {
 
     stream = try IOStream.initTest(allocator, TEST_GET_2);
     request = try Request.initTest(allocator, &stream);
-    stream.startTest();
     _ = try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Get);
     testing.expectEqual(request.version, Request.Version.Http1_1);
@@ -651,7 +649,6 @@ test "01-parse-request-line" {
 
     stream = try IOStream.initTest(allocator, TEST_POST_1);
     request = try Request.initTest(allocator, &stream);
-    stream.startTest();
     _ = try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Post);
     testing.expectEqual(request.version, Request.Version.Http1_1);
@@ -663,6 +660,89 @@ test "01-parse-request-line" {
 
 }
 
+fn expectBadRequest(err: anyerror, buf: []const u8) void {
+    var buffer: [1024*1024]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const allocator = &fba.allocator;
+    var stream = IOStream.initTest(allocator, buf) catch unreachable;
+    var request = Request.initTest(allocator, &stream) catch unreachable;
+    testing.expectError(err, request.parseTest(&stream));
+}
+
+test "01-parse-request-errors" {
+    // Invalid method
+    expectBadRequest(error.BadRequest,
+        \\GOT /this/path/is/nonsense HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Missing space
+    expectBadRequest(error.BadRequest,
+        \\GET/this/path/is/nonsense HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Bad url
+    expectBadRequest(error.BadRequest,
+        \\GET 0000000000000000000000000 HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Empty request line
+    expectBadRequest(error.BadRequest,
+        \\
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Bad version
+    expectBadRequest(error.UnsupportedHttpVersion,
+        \\GET / HTTP/7.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Invalid version
+    expectBadRequest(error.BadRequest,
+        \\GET / HXX/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Bad url
+    expectBadRequest(error.BadRequest,
+        \\GET /what?are? HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Empty header
+    expectBadRequest(error.BadRequest,
+        \\GET /api/something/ HTTP/1.0
+        \\: localhost:8000
+        \\
+        \\
+    );
+
+    // Bad header
+    expectBadRequest(error.BadRequest,
+        \\GET /api/something/ HTTP/1.0
+        \\Host?: localhost:8000
+        \\
+        \\
+    );
+}
+
 test "02-parse-request-multiple" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
@@ -670,8 +750,6 @@ test "02-parse-request-multiple" {
     const REQUESTS = TEST_GET_1 ++ TEST_GET_2 ++ TEST_POST_1;
     var stream = try IOStream.initTest(allocator, REQUESTS);
     var request = try Request.initTest(allocator, &stream);
-    stream.startTest();
-
     var n = try request.parseTest(&stream);
     testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
@@ -682,6 +760,7 @@ test "02-parse-request-multiple" {
     //testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
 
 }
+
 
 test "03-bench-parse-request-line" {
     var buffer: [1024*1024]u8 = undefined;
@@ -696,7 +775,6 @@ test "03-bench-parse-request-line" {
 
     var i: usize = 0; // 1M
     while (i < requests) : (i += 1) {
-        stream.startTest();
 
         // 10000k req/s 750MB/s (100 ns/req)
         try request.parseRequestLine(&stream, 2048);
@@ -704,6 +782,7 @@ test "03-bench-parse-request-line" {
         request.reset();
         fba.reset();
         request.buffer.items.len = stream.in_buffer.len;
+        stream.reset();
     }
     const ns = timer.lap();
     const ms = ns / 1000000;
@@ -750,7 +829,6 @@ test "04-parse-request-headers" {
         \\
     );
     var request = try Request.initTest(allocator, &stream);
-    stream.startTest();
     _ = try request.parseTest(&stream);
     var h = &request.headers;
 
