@@ -209,6 +209,10 @@ pub const Headers = struct {
         return self.headers.append(Header{.key=key, .value=value});
     }
 
+    pub fn appendAssumeCapacity(self: *Headers, key: []const u8, value: []const u8) void {
+        return self.headers.appendAssumeCapacity(Header{.key=key, .value=value});
+    }
+
     pub fn remove(self: *Headers, key: []const u8) !void {
         const i = try self.lookup(key); // Throw error
         const v = self.headers.swapRemove(i);
@@ -302,7 +306,7 @@ pub const Headers = struct {
             if (ch != '\n') return error.BadRequest;
 
             //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
-            try self.append(key.?, value.?);
+            self.appendAssumeCapacity(key.?, value.?);
         }
         if (stream.readCount() >= read_limit) return error.RequestHeaderFieldsTooLarge;
     }

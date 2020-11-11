@@ -29,10 +29,11 @@ const PATC = @bitCast(u32, [4]u8{'P', 'A', 'T', 'C'});
 const DELE = @bitCast(u32, [4]u8{'D', 'E', 'L', 'E'});
 const OPTI = @bitCast(u32, [4]u8{'O', 'P', 'T', 'I'});
 const ONS_ = @bitCast(u32, [4]u8{'O', 'N', 'S', '_'});
-const HTTPs1p1 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '1', '.', '1'});
-const HTTPs1p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '1', '.', '0'});
-const HTTPs2p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '2', '.', '0'});
-const HTTPs3p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '3', '.', '0'});
+const HTTP = @bitCast(u32, [4]u8{'H', 'T', 'T', 'P'});
+const V1p1 = @bitCast(u32, [4]u8{'/', '1', '.', '1'});
+const V1p0 = @bitCast(u32, [4]u8{'/', '1', '.', '0'});
+const V2p0 = @bitCast(u32, [4]u8{'/', '2', '.', '0'});
+const V3p0 = @bitCast(u32, [4]u8{'/', '3', '.', '0'});
 
 
 pub const Request = struct {
@@ -191,7 +192,7 @@ pub const Request = struct {
         return self.parseNoSwap(stream, .{});
     }
 
-    inline fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
+    fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
         const start = stream.readCount();
 
         try self.parseRequestLine(stream, options.max_request_line_size);
@@ -203,7 +204,7 @@ pub const Request = struct {
         return end;
     }
 
-    pub inline fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
+    pub fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
         if (stream.isEmpty()) return error.EndOfBuffer;
 
         var ch: u8 = stream.lastByte();
@@ -236,64 +237,51 @@ pub const Request = struct {
         if (ch != '\n') return error.BadRequest;
     }
 
-    inline fn parseMethod(self: *Request, stream: *IOStream) !void {
-        @setRuntimeSafety(false); // Checked below
+    fn parseMethod(self: *Request, stream: *IOStream) !void {
         const buf = stream.readBuffered();
         if (buf.len < 8) return error.EndOfBuffer;
-        const v = @bitCast(u32, buf[0..4].*);
         stream.skipBytes(4);
-        switch (v) {
-            GET_ => {
-                self.method = .Get;
-            },
-            PUT_ => {
-                self.method = .Put;
-            },
-            POST => {
-                if (stream.readByteUnsafe() != ' ') return error.BadRequest;
-                self.method = .Post;
-            },
-            HEAD => {
-                if (stream.readByteUnsafe() != ' ') return error.BadRequest;
-                self.method = .Head;
-            },
-            DELE => {
-                if (stream.readByteUnsafe() != 'T' or
-                    stream.readByteUnsafe() != 'E' or
-                    stream.readByteUnsafe() != ' ') return error.BadRequest;
-                self.method = .Delete;
-            },
-            PATC => {
-                if (stream.readByteUnsafe() != 'H' or
-                    stream.readByteUnsafe() != ' ') return error.BadRequest;
-                self.method = .Patch;
-            },
-            OPTI => {
+        self.method = switch (@bitCast(u32, buf[0..4].*)) {
+            GET_ => Method.Get,
+            PUT_ => Method.Put,
+            POST => if (stream.readByteUnsafe() == ' ') Method.Post else Method.Unknown,
+            HEAD => if (stream.readByteUnsafe() == ' ') Method.Head else Method.Unknown,
+            DELE => if (stream.readByteUnsafe() == 'T' and
+                        stream.readByteUnsafe() == 'E' and
+                        stream.readByteUnsafe() == ' ') Method.Delete
+                    else Method.Unknown,
+            PATC => if (stream.readByteUnsafe() == 'H' and
+                        stream.readByteUnsafe() == ' ') Method.Patch
+                    else Method.Unknown,
+            OPTI => blk: {
                 stream.skipBytes(4);
-                if (@bitCast(u32, buf[4..8].*) != ONS_) return error.BadRequest;
-                self.method = .Options;
+                const r = if (@bitCast(u32, buf[4..8].*) != ONS_) Method.Options
+                    else Method.Unknown;
+                break :blk r;
             },
-            else => return error.BadRequest, // Unknown method or doesn't have a space
-        }
+            else => Method.Unknown, // Unknown method or doesn't have a space
+        };
+        if (self.method == .Unknown) return error.BadRequest;
     }
 
-    pub inline fn parseVersion(self: *Request, stream: *IOStream) !void {
-        @setRuntimeSafety(false); // Checked below
+    pub fn parseVersion(self: *Request, stream: *IOStream) !void {
         const buf = stream.readBuffered();
         if (buf.len < 8) return error.EndOfBuffer;
-        stream.skipBytes(8);
-        self.version = switch (@bitCast(u64, buf[0..8].*)) {
-            HTTPs1p0 => .Http1_0,
-            HTTPs1p1 => .Http1_1,
-            HTTPs2p0 => .Http2_0,
-            HTTPs3p0 => .Http3_0,
-            else => return error.UnsupportedHttpVersion,
+        if (@bitCast(u32, buf[0..4].*) != HTTP) return error.BadRequest;
+        self.version = switch (@bitCast(u32, buf[4..8].*)) {
+            V1p0 => .Http1_0,
+            V1p1 => .Http1_1,
+            V2p0 => .Http2_0,
+            V3p0 => .Http3_0,
+            else => .Unknown,
         };
+        if (self.version == .Unknown) return error.UnsupportedHttpVersion;
+        stream.skipBytes(8);
     }
 
     // Parse the url, this populates, the uri, host, scheme, and query
     // when available. The trailing space is consumed.
-    pub inline fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
+    pub fn parseUri(self: *Request, stream: *IOStream, max_size: usize) !void {
         //@setRuntimeSafety(false); // We already check it
         const buf = self.buffer.items;
         const index = stream.readCount();
@@ -366,7 +354,7 @@ pub const Request = struct {
         self.uri = buf[index..end];
     }
 
-    pub inline fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
+    pub fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
         //@setRuntimeSafety(false);
         const buf = self.buffer.items;
         const index = stream.readCount()-1;
@@ -399,7 +387,7 @@ pub const Request = struct {
         return end;
     }
 
-    pub inline fn parseContentLength(self: *Request, max_size: usize) !void {
+    pub fn parseContentLength(self: *Request, max_size: usize) !void {
         const headers = &self.headers;
         // Read content length
         const header: ?[]const u8 = headers.get("Content-Length") catch null;
