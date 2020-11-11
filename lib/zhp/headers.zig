@@ -241,7 +241,8 @@ pub const Headers = struct {
         var key: ?[]u8 = null;
         var value: ?[]u8 = null;
 
-        const read_limit = max_size + stream.readCount();
+        const limit = std.math.min(max_size, stream.amountBuffered());
+        const read_limit = limit + stream.readCount();
         // Strip any whitespace
         while (self.headers.items.len < self.headers.capacity) {
             // TODO: This assumes that the whole header in the buffer
@@ -266,10 +267,9 @@ pub const Headers = struct {
                     while (stream.readCount() < read_limit) {
                         // If we get a bad request here it's most likely because
                         // the client didn't send a \r\n after its last header
-                        // TODO: Should this be allowed?
                         if (ch == ':') break;
                         if (!util.isTokenChar(ch)) return error.BadRequest;
-                        ch = try stream.readByteSafe();
+                        ch = stream.readByteUnsafe();
                     }
 
                     // Header name
@@ -277,7 +277,7 @@ pub const Headers = struct {
 
                     // Strip whitespace
                     while (stream.readCount() < read_limit) {
-                        ch = try stream.readByteSafe();
+                        ch = stream.readByteUnsafe();
                         if (!(ch == ' ' or ch == '\t')) break;
                     }
                 },
@@ -287,7 +287,7 @@ pub const Headers = struct {
             index = stream.readCount()-1;
             while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = try stream.readByteSafe();
+                ch = stream.readByteUnsafe();
             }
 
             // TODO: Strip trailing spaces and tabs?
@@ -296,19 +296,25 @@ pub const Headers = struct {
             // Ignore any remaining non-print characters
             while (stream.readCount() < read_limit) {
                 if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = try stream.readByteSafe();
+                ch = stream.readByteUnsafe();
+            }
+
+            if (stream.readCount() >= read_limit) {
+                if (stream.isEmpty()) return error.EndOfBuffer;
+                return error.RequestHeaderFieldsTooLarge;
             }
 
             // Check CRLF
             if (ch == '\r') {
                 ch = try stream.readByteSafe();
             }
-            if (ch != '\n') return error.BadRequest;
+            if (ch != '\n') {
+                return error.BadRequest;
+            }
 
             //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
             self.appendAssumeCapacity(key.?, value.?);
         }
-        if (stream.readCount() >= read_limit) return error.RequestHeaderFieldsTooLarge;
     }
 
     pub fn parseBuffer(self: *Headers, data: []const u8, max_size: usize) !void {

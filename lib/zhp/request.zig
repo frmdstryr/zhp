@@ -665,7 +665,7 @@ test "01-parse-request-line" {
 
 }
 
-fn expectBadRequest(err: anyerror, buf: []const u8) void {
+fn expectParseError(err: anyerror, buf: []const u8) void {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
@@ -674,85 +674,116 @@ fn expectBadRequest(err: anyerror, buf: []const u8) void {
     testing.expectError(err, request.parseTest(&stream));
 }
 
-test "01-parse-request-errors" {
-    // Invalid method
-    expectBadRequest(error.BadRequest,
+test "01-invalid-method" {
+    expectParseError(error.BadRequest,
         \\GOT /this/path/is/nonsense HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Invalid method
-    expectBadRequest(error.BadRequest,
+test "01-invalid-method-2" {
+    expectParseError(error.BadRequest,
         \\DEL TE /api/users/12/ HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Missing space
-    expectBadRequest(error.BadRequest,
+test "01-no-space" {
+    expectParseError(error.BadRequest,
         \\GET/this/path/is/nonsense HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Bad url
-    expectBadRequest(error.BadRequest,
+test "01-bad-url" {
+    expectParseError(error.BadRequest,
         \\GET 0000000000000000000000000 HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Empty request line
-    expectBadRequest(error.BadRequest,
+test "01-empty-request-line" {
+    expectParseError(error.BadRequest,
         \\
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Bad version
-    expectBadRequest(error.UnsupportedHttpVersion,
+test "01-unsupported-version" {
+    expectParseError(error.UnsupportedHttpVersion,
         \\GET / HTTP/7.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Invalid version
-    expectBadRequest(error.BadRequest,
+test "01-version-malformed" {
+    expectParseError(error.BadRequest,
         \\GET / HXX/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Bad url
-    expectBadRequest(error.BadRequest,
+test "01-url-malformed" {
+    expectParseError(error.BadRequest,
         \\GET /what?are? HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
     );
+}
 
-    // Empty header
-    expectBadRequest(error.BadRequest,
+test "01-empty-header" {
+    expectParseError(error.BadRequest,
         \\GET /api/something/ HTTP/1.0
         \\: localhost:8000
         \\
         \\
     );
+}
 
-    // Bad header
-    expectBadRequest(error.BadRequest,
+test "01-invalid-header-name" {
+    expectParseError(error.BadRequest,
         \\GET /api/something/ HTTP/1.0
         \\Host?: localhost:8000
         \\
         \\
+    );
+}
+
+test "01-header-too-long" {
+    const opts = Request.ParseOptions{};
+    const name = [_]u8{'x'} ** (opts.max_header_size+1024);
+    expectParseError(error.RequestHeaderFieldsTooLarge,
+        "GET /api/something/ HTTP/1.0\r\n" ++
+        name ++ ": foo\r\n" ++
+        "\r\n\r\n"
+    );
+}
+
+test "01-partial-request" {
+    expectParseError(error.EndOfBuffer,
+        "GET /api/something/ HTTP/1.0\r\n" ++
+        "Host: localhost\r"
+    );
+}
+
+test "01-partial-request-line" {
+    expectParseError(error.EndOfBuffer,
+        "GET /api/somethithing/long/path/slow"
     );
 }
 
