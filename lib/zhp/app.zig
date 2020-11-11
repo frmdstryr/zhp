@@ -472,7 +472,7 @@ pub fn sortedRoutes(comptime routes: []const Route) []const Route{
 pub const Clock = struct {
     buffer: [32]u8 = undefined,
     last_updated: i64 = 0,
-    lock: std.event.Lock = std.event.Lock{},
+    lock: util.Lock = util.Lock{},
     value: []const u8 = "",
 
     pub fn get(self: *Clock) []const u8 {
@@ -492,6 +492,19 @@ pub const Clock = struct {
         }
     }
 
+};
+
+const IndexHandler = struct {
+    pub fn get(self: *IndexHandler, request: *Request, response: *Response) !void {
+        try response.stream.writeAll(
+            \\No routes are defined
+            \\Please add a list of routes in your main zig file.
+        );
+    }
+};
+
+const default_route = [_]Route{
+    Route.create("index", "/", IndexHandler),
 };
 
 pub const Application = struct {
@@ -548,7 +561,8 @@ pub const Application = struct {
     };
 
 
-    pub const routes: []const Route = sortedRoutes(root.routes[0..]);
+    pub const routes: []const Route = if (@hasDecl(root, "routes"))
+        sortedRoutes(root.routes[0..]) else default_route[0..];
     const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
         root.error_handler else handlers.ServerErrorHandler);
     const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))

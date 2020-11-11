@@ -472,7 +472,8 @@ pub const IOStream = struct {
 
 };
 
-
+// The event based lock doesn't work without evented io
+pub const Lock = if (std.io.is_async) std.event.Lock else std.Mutex;
 
 pub fn ObjectPool(comptime T: type) type {
     return struct {
@@ -487,7 +488,7 @@ pub fn ObjectPool(comptime T: type) type {
         free_objects: ObjectList,
 
         // Lock to use if using threads
-        lock: std.event.Lock = std.event.Lock{},
+        lock: Lock = Lock{},
 
         pub fn init(allocator: *Allocator) Self {
             return Self{
