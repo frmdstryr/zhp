@@ -49,7 +49,6 @@ const token_map = [_]u1{
 };
 
 pub inline fn isTokenChar(ch: u8) bool {
-    @setRuntimeSafety(false);
     return token_map[ch] == 1;
 }
 
@@ -237,6 +236,10 @@ pub const IOStream = struct {
         return self._in_end_index-self._in_start_index;
     }
 
+    pub inline fn isEmpty(self: *Self) bool {
+        return self._in_end_index == self._in_start_index;
+    }
+
     pub inline fn readCount(self: *Self) usize {
         //return self._in_count + self._in_start_index;
         return self._in_start_index;
@@ -246,6 +249,10 @@ pub const IOStream = struct {
         const n = math.min(size, self.amountBuffered());
         self._in_start_index += n;
         return n;
+    }
+
+    pub inline fn skipBytes(self: *Self, n: usize) void {
+        self._in_start_index += n;
     }
 
     pub inline fn readBuffered(self: *Self) []u8 {
@@ -345,6 +352,32 @@ pub const IOStream = struct {
 
     pub inline fn lastByte(self: *Self) u8 {
         return self.in_buffer[self._in_start_index];
+    }
+
+    pub fn readTokenUntil(self: *Self, ) ![]const u8 {
+        const start = self.readCount();
+        var found = false;
+        while (self.amountBuffered() >= 8) {
+            inline for ("01234567") |_| {
+                if (try expr(self.readByteUnsafe())) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            while (self.amountBuffered() > 0) {
+                if (expr(self.readByteUnsafe())) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        const end = self.readCount();
+        if (end == self._in_end_index) {
+            return error.EndOfBuffer;
+        }
+        return self.in_buffer[start..end];
     }
 
     // ------------------------------------------------------------------------

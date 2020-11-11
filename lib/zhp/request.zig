@@ -21,6 +21,28 @@ const IOStream = util.IOStream;
 
 const simd = @import("simd.zig");
 
+const GET_ = @bitCast(u32, [4]u8{'G', 'E', 'T', ' '});
+const PUT_ = @bitCast(u32, [4]u8{'P', 'U', 'T', ' '});
+const POST = @bitCast(u32, [4]u8{'P', 'O', 'S', 'T'});
+const HEAD = @bitCast(u32, [4]u8{'H', 'E', 'A', 'D'});
+const PATC = @bitCast(u32, [4]u8{'P', 'A', 'T', 'C'});
+const DELE = @bitCast(u32, [4]u8{'D', 'E', 'L', 'E'});
+const OPTI = @bitCast(u32, [4]u8{'O', 'P', 'T', 'I'});
+const ONS_ = @bitCast(u32, [4]u8{'O', 'N', 'S', '_'});
+const HTTPs1p1 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '1', '.', '1'});
+const HTTPs1p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '1', '.', '0'});
+const HTTPs2p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '2', '.', '0'});
+const HTTPs3p0 = @bitCast(u64, [8]u8{'H', 'T', 'T', 'P', '/', '3', '.', '0'});
+
+const POST_ = @bitCast(u64, [8]u8{'P', 'O', 'S', 'T', ' ', 0, 0, 0});
+const HEAD_ = @bitCast(u64, [8]u8{'H', 'E', 'A', 'D', ' ', 0, 0, 0});
+const PATCH_ = @bitCast(u64, [8]u8{'P', 'A', 'T', 'C', 'H', ' ', 0, 0});
+const DELETE_ = @bitCast(u64, [8]u8{'D', 'E', 'L', 'E', 'T', 'E', ' ', 0});
+const OPTIONS_ = @bitCast(u64, [8]u8{'O', 'P', 'T', 'I', 'O', 'N', 'S', ' '});
+
+
+
+
 pub const Request = struct {
     pub const Content = struct {
         pub const StorageType = enum {
@@ -55,6 +77,8 @@ pub const Request = struct {
         Unknown,
         Http1_0,
         Http1_1,
+        Http2_0,
+        Http3_0,
     };
 
     pub const Scheme = enum {
@@ -188,118 +212,93 @@ pub const Request = struct {
         return end;
     }
 
-    // Based on picohttpparser
-    // FIXME: Use readByte instead of readByteFast
-    // readByteFast is 3x faster but doesn't handle slowloris
     pub inline fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
-        const buf = &self.buffer;
-        const read_limit = max_size + stream.readCount();
+        if (stream.isEmpty()) return error.EndOfStream;
 
-        // FIXME: If the whole method is not in the initial read
-        // buffer this bails out
-        var ch: u8 = try stream.readByteSafe();
-
-        // Skip any leading CRLFs
-        while (stream.readCount() < read_limit) {
-            switch (ch) {
-                '\r' => {
-                    ch = try stream.readByteSafe();
-                    if (ch != '\n') return error.BadRequest;
-                },
-                '\n' => {},
-                else => break,
-            }
-            ch = try stream.readByteSafe();
-        }
-        if (stream.readCount() >= read_limit) {
-            return error.RequestUriTooLong; // Too Big
-        }
-
-        // Read the method
+        var ch: u8 = stream.lastByte();
         switch (ch) {
-            'G' => { // GET
-                inline for("ET") |expected| {
-                    ch = try stream.readByteSafe();
-                    if (ch != expected) return error.MethodNotAllowed;
-                }
-                self.method = Method.Get;
-            },
-            'P' => {
+            '\r' => {
+                stream.skipBytes(1);
                 ch = try stream.readByteSafe();
-                switch (ch) {
-                    'U' => {
-                        ch = try stream.readByteSafe();
-                        if (ch != 'T') return error.MethodNotAllowed;
-                        self.method = Method.Put;
-                    },
-                    'O' => {
-                        inline for("ST") |expected| {
-                            ch = try stream.readByteSafe();
-                            if (ch != expected) return error.MethodNotAllowed;
-                        }
-                        self.method = Method.Post;
-                    },
-                    'A' => {
-                        inline for("TCH") |expected| {
-                            ch = try stream.readByteSafe();
-                            if (ch != expected) return error.MethodNotAllowed;
-                        }
-                        self.method = Method.Patch;
-                    },
-                    else => return error.MethodNotAllowed,
-                }
+                if (ch != '\n') return error.BadRequest;
             },
-            'H' => {
-                inline for("EAD") |expected| {
-                    ch = try stream.readByteSafe();
-                    if (ch != expected) return error.MethodNotAllowed;
-                }
-                self.method = Method.Head;
+            '\n' => {
+                stream.skipBytes(1);
             },
-            'D' => {
-                inline for("ELETE") |expected| {
-                    ch = try stream.readByteSafe();
-                    if (ch != expected) return error.MethodNotAllowed;
-                }
-                self.method = Method.Delete;
-            },
-            'O' => {
-                inline for("PTIONS") |expected| {
-                    ch = try stream.readByteSafe();
-                    if (ch != expected) return error.MethodNotAllowed;
-                }
-                self.method = Method.Options;
-
-            },
-            else => return error.MethodNotAllowed,
+            else => {},
         }
 
-        // Check separator
-        ch = try stream.readByteSafe();
-        if (ch != ' ') return error.BadRequest;
+        // Parse method
+        try self.parseMethod(stream);
 
-        // Parse Uri
+        // Parse path
         try self.parseUri(stream, max_size);
 
         // Read version
-        inline for("HTTP/1.") |expected| {
-            ch = try stream.readByteSafe();
-            if (ch != expected) return error.BadRequest;
-        }
-        ch = try stream.readByteSafe();
-        self.version = switch (ch) {
-            '0' => Version.Http1_0,
-            '1' => Version.Http1_1,
-            else => return error.UnsupportedHttpVersion,
-        };
+        try self.parseVersion(stream);
 
         // Read to end of the line
         ch = try stream.readByteSafe();
-
         if (ch == '\r') {
             ch = try stream.readByteSafe();
         }
         if (ch != '\n') return error.BadRequest;
+    }
+
+    inline fn parseMethod(self: *Request, stream: *IOStream) !void {
+        @setRuntimeSafety(false);
+        const buf = stream.readBuffered();
+        // We can check for 8 here because we know the version must exist
+        if (buf.len < 8) return error.BadRequest;
+        const v = @bitCast(u32, buf[0..4].*);
+        stream.skipBytes(4);
+        switch (v) {
+            GET_ => {
+                self.method = .Get;
+            },
+            PUT_ => {
+                self.method = .Put;
+            },
+            POST => {
+                if (stream.readByteUnsafe() != ' ') return error.BadRequest;
+                self.method = .Post;
+            },
+            HEAD => {
+                if (stream.readByteUnsafe() != ' ') return error.BadRequest;
+                self.method = .Head;
+            },
+            DELE => {
+                if (stream.readByteUnsafe() != 'T' or
+                    stream.readByteUnsafe() != 'E' or
+                    stream.readByteUnsafe() != ' ') return error.BadRequest;
+                self.method = .Delete;
+            },
+            PATC => {
+                if (stream.readByteUnsafe() != 'H' or
+                    stream.readByteUnsafe() != ' ') return error.BadRequest;
+                self.method = .Patch;
+            },
+            OPTI => {
+                stream.skipBytes(4);
+                if (@bitCast(u32, buf[4..8].*) != ONS_) return error.BadRequest;
+                self.method = .Options;
+            },
+            else => return error.BadRequest, // Unknown method or doesn't have a space
+        }
+    }
+
+    pub inline fn parseVersion(self: *Request, stream: *IOStream) !void {
+        @setRuntimeSafety(false);
+        const buf = stream.readBuffered();
+        if (buf.len < 8) return error.BadRequest;
+        stream.skipBytes(8);
+        self.version = switch (@bitCast(u64, buf[0..8].*)) {
+            HTTPs1p0 => .Http1_0,
+            HTTPs1p1 => .Http1_1,
+            HTTPs2p0 => .Http2_0,
+            HTTPs3p0 => .Http3_0,
+            else => return error.UnsupportedHttpVersion,
+        };
     }
 
     // Parse the url, this populates, the uri, host, scheme, and query
