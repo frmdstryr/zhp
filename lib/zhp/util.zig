@@ -454,7 +454,7 @@ pub fn ObjectPool(comptime T: type) type {
         free_objects: ObjectList,
 
         // Lock to use if using threads
-        lock: std.Mutex = std.Mutex{},
+        lock: std.event.Lock = std.event.Lock{},
 
         pub fn init(allocator: *Allocator) Self {
             return Self{

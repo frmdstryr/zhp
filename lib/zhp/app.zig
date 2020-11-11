@@ -472,7 +472,7 @@ pub fn sortedRoutes(comptime routes: []const Route) []const Route{
 pub const Clock = struct {
     buffer: [32]u8 = undefined,
     last_updated: i64 = 0,
-    lock: std.Mutex = std.Mutex{},
+    lock: std.event.Lock = std.event.Lock{},
     value: []const u8 = "",
 
     pub fn get(self: *Clock) []const u8 {
@@ -698,8 +698,8 @@ pub const Application = struct {
         while (self.running) {
             time.sleep(1*time.ns_per_s);
             self.clock.update();
-
-            if (self.connection_pool.lock.tryAcquire()) |lock| {
+            {
+                var lock = self.connection_pool.lock.acquire();
                 defer lock.release();
                 if (self.connection_pool.free_objects.popOrNull()) |conn| {
                     conn.deinit();
@@ -707,7 +707,8 @@ pub const Application = struct {
                 }
             }
 
-            if (self.request_pool.lock.tryAcquire()) |lock| {
+            {
+                var lock = self.request_pool.lock.acquire();
                 defer lock.release();
                 if (self.request_pool.free_objects.popOrNull()) |req| {
                     req.deinit();
