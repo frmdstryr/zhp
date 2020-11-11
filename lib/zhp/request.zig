@@ -100,33 +100,29 @@ pub const Request = struct {
     // TODO: Parse this into a map
     query: []const u8 = "",
 
+    // Slice from the start to the body
+    head: []const u8 = "",
+
     // Content length pulled from the content-length header (if present)
     content_length: usize = 0,
 
+    // Set once the read is complete and no more reads will be done on the
+    // vafter which it's safe to defer processing to another thread
+    read_finished: bool = false,
+
     // All headers
     headers: Headers,
+
+    // Holds the whole request (for now)
+    buffer: Bytes,
+
+    stream: ?*IOStream = null,
 
     // Body of request will be one of these depending on the size
     content: ?Content = null,
 
     // Client address
     client: Address,
-
-    // ------------------------------------------------------------------------
-    // Internal fields
-    // ------------------------------------------------------------------------
-
-    // Set once the read is complete and no more reads will be done on the
-    // vafter which it's safe to defer processing to another thread
-    read_finished: bool = false,
-
-    // Holds the whole request (for now)
-    buffer: Bytes,
-
-    // Slice from the start to the body
-    head: []const u8 = "",
-
-    stream: ?*IOStream = null,
 
     // ------------------------------------------------------------------------
     // Constructors
@@ -155,7 +151,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Parsing
     // ------------------------------------------------------------------------
-    pub fn parse(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
+    pub fn parse(self: *Request, stream: *IOStream, options: ParseOptions) !void {
         // Swap the buffer so no copying occurs while reading
         // Want to dump directly into the request buffer
         self.buffer.expandToCapacity();
@@ -176,7 +172,7 @@ pub const Request = struct {
 //
 
         while (true) {
-            return self.parseNoSwap(stream, options) catch |err| switch (err) {
+            self.parseNoSwap(stream, options) catch |err| switch (err) {
                 error.EndOfBuffer => {
                     const n = try stream.shiftAndFillBuffer(start);
                     if (n == 0) return error.EndOfStream;
@@ -185,14 +181,15 @@ pub const Request = struct {
                 },
                 else => return err,
             };
+            return;
         }
     }
 
-    inline fn parseTest(self: *Request, stream: *IOStream) !usize {
+    inline fn parseTest(self: *Request, stream: *IOStream) !void {
         return self.parseNoSwap(stream, .{});
     }
 
-    fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !usize {
+    fn parseNoSwap(self: *Request, stream: *IOStream, options: ParseOptions) !void {
         const start = stream.readCount();
 
         try self.parseRequestLine(stream, options.max_request_line_size);
@@ -201,12 +198,12 @@ pub const Request = struct {
 
         const end = stream.readCount();
         self.head = self.buffer.items[start..end];
-        return end;
     }
 
     pub fn parseRequestLine(self: *Request, stream: *IOStream, max_size: usize) !void {
         if (stream.isEmpty()) return error.EndOfBuffer;
 
+        // Skip leading newline if any
         var ch: u8 = stream.lastByte();
         switch (ch) {
             '\r' => {
@@ -421,12 +418,7 @@ pub const Request = struct {
     //}
 
     pub fn readBody(self: *Request, stream: *IOStream) !void {
-        defer {
-            // Once the read finishes we no longer want to be able to access
-            // the stream (as that should be done with other requests)
-            self.read_finished = true;
-            self.stream = null;
-        }
+        defer self.read_finished = true;
         if (self.content_length > 0) {
             try self.readFixedBody(stream);
         } else if (self.headers.eqlIgnoreCase("Transfer-Encoding", "chunked")) {
@@ -544,20 +536,18 @@ pub const Request = struct {
     // without needing to reallocate. Usefull when using an ObjectPool
     pub fn reset(self: *Request) void {
         self.method = .Unknown;
+        self.version = .Unknown;
         self.scheme = .Unknown;
-        self.path = "";
         self.uri = "";
+        self.host = "";
+        self.path = "";
         self.query = "";
         self.head = "";
-
-        self.cleanup();
-
-        self.version = .Unknown;
         self.content_length = 0;
         self.read_finished = false;
-        self.headers.reset();
         self.buffer.items.len = 0;
-        self.stream = null;
+        self.headers.reset();
+        self.cleanup();
     }
 
     pub fn cleanup(self: *Request) void {
@@ -623,13 +613,21 @@ const TEST_POST_1 =
     \\
 ;
 
+const TEST_DELETE_1 =
+    \\DELETE /api/users/12/ HTTP/1.0
+    \\Host: bs.serving-sys.com
+    \\Connection: keep-alive
+    \\
+    \\
+;
+
 test "01-parse-request-line" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = &fba.allocator;
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
-    _ = try request.parseTest(&stream);
+    try request.parseTest(&stream);
 
     testing.expectEqual(request.method, Request.Method.Get);
     testing.expectEqual(request.version, Request.Version.Http1_1);
@@ -638,7 +636,7 @@ test "01-parse-request-line" {
 
     stream = try IOStream.initTest(allocator, TEST_GET_2);
     request = try Request.initTest(allocator, &stream);
-    _ = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Get);
     testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
@@ -649,7 +647,7 @@ test "01-parse-request-line" {
 
     stream = try IOStream.initTest(allocator, TEST_POST_1);
     request = try Request.initTest(allocator, &stream);
-    _ = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     testing.expectEqual(request.method, Request.Method.Post);
     testing.expectEqual(request.version, Request.Version.Http1_1);
     testing.expectEqualSlices(u8, request.uri,
@@ -657,6 +655,13 @@ test "01-parse-request-line" {
     testing.expectEqualSlices(u8, request.host, "bs.serving-sys.com");
     testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
     testing.expectEqualSlices(u8, request.query, "cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1");
+
+    stream = try IOStream.initTest(allocator, TEST_DELETE_1);
+    request = try Request.initTest(allocator, &stream);
+    try request.parseTest(&stream);
+    testing.expectEqual(request.method, Request.Method.Delete);
+    testing.expectEqual(request.version, Request.Version.Http1_0);
+    testing.expectEqualStrings(request.path, "/api/users/12/");
 
 }
 
@@ -673,6 +678,14 @@ test "01-parse-request-errors" {
     // Invalid method
     expectBadRequest(error.BadRequest,
         \\GOT /this/path/is/nonsense HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+
+    // Invalid method
+    expectBadRequest(error.BadRequest,
+        \\DEL TE /api/users/12/ HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
@@ -750,12 +763,12 @@ test "02-parse-request-multiple" {
     const REQUESTS = TEST_GET_1 ++ TEST_GET_2 ++ TEST_POST_1;
     var stream = try IOStream.initTest(allocator, REQUESTS);
     var request = try Request.initTest(allocator, &stream);
-    var n = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
-    n = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
-    n = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     // I have no idea why but this seems to mess up the speed of the next test
     //testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
 
@@ -829,7 +842,7 @@ test "04-parse-request-headers" {
         \\
     );
     var request = try Request.initTest(allocator, &stream);
-    _ = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     var h = &request.headers;
 
     testing.expectEqual(@as(usize, 6), h.headers.items.len);
@@ -850,7 +863,7 @@ test "04-parse-request-headers" {
     // Next
     try stream.load(allocator, TEST_GET_1);
     request = try Request.initTest(allocator, &stream);
-    _ = try request.parseTest(&stream);
+    try request.parseTest(&stream);
     h = &request.headers;
 
     testing.expectEqual(@as(usize, 9), h.headers.items.len);
@@ -887,7 +900,6 @@ test "05-bench-parse-request-headers" {
     var request = try Request.initTest(allocator, &stream);
 
     const requests: usize = 1000000;
-    var n: usize = 0;
     var timer = try std.time.Timer.start();
     var i: usize = 0; // 1M
     while (i < requests) : (i += 1) {
@@ -896,12 +908,13 @@ test "05-bench-parse-request-headers" {
         request.buffer.items.len = TEST_GET_1.len;
 
         //     1031k req/s 725MB/s (969 ns/req)
-        n = try request.parseTest(&stream);
+        try request.parseTest(&stream);
         request.reset();
         fba.reset();
         stream.reset();
     }
 
+    const n = TEST_GET_1.len;
     const ns = timer.lap();
     const ms = ns / 1000000;
     const bytes = requests * n / time.ms_per_s;

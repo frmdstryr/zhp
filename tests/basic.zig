@@ -43,7 +43,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
     while (true) {
         cnt += 1;
         defer request.reset();
-        var n = request.parse(&stream, .{}) catch |err| switch (err) {
+        request.parse(&stream, .{}) catch |err| switch (err) {
             error.EndOfStream, error.BrokenPipe,
             error.ConnectionResetByPeer => break,
             else => return err,

@@ -237,14 +237,15 @@ pub const ServerConnection = struct {
         };
 
         request.client = conn.address;
+        request.stream = &self.io;
+        defer request.stream = null;
 
         // Start serving requests
         while (true) {
             defer server_request.reset();
 
             // Parse the request line and headers
-            request.stream = &self.io;
-            const n = request.parse(&self.io, options) catch |err| blk: {
+            request.parse(&self.io, options) catch |err| {
                 server_request.err = err;
 
 //                 if (params.debug) {
@@ -257,8 +258,6 @@ pub const ServerConnection = struct {
 //                             std.debug.detectTTYConfig());
 //                     }
 //                 }
-
-                break :blk self.io.readCount();
             };
 
             // Get the function used to build the handler for the request
