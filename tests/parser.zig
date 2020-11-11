@@ -30,7 +30,7 @@ pub fn main() !void {
         var file = try fs.cwd().openFile(t.path, .{});
         timer.reset();
         const cnt = try parseRequests(file);
-        std.debug.warn("Done! ({} ns)\n", .{timer.read()});
+        std.debug.warn("Done! ({} ns/req)\n", .{timer.read() / t.count});
         std.testing.expectEqual(t.count, cnt);
     }
 }
