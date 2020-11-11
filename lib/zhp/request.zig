@@ -359,14 +359,33 @@ pub const Request = struct {
         const read_limit = limit + stream.readCount();
 
         var query_start: ?usize = null;
-        while (stream.readCount() < read_limit) {
-            const ch = stream.readByteUnsafe();
-            if (!ascii.isGraph(ch)) {
-                if (ch == ' ') break;
-                return error.BadRequest;
-            } else if (ch == '?') {
-                if (query_start != null) return error.BadRequest;
-                query_start = stream.readCount();
+
+        var found = false;
+        while (!found and stream.readCount() + 8 < read_limit) {
+            inline for("01234567") |_| {
+                const ch = stream.readByteUnsafe();
+                if (!ascii.isGraph(ch)) {
+                    if (ch == ' ') {
+                        found = true;
+                        break;
+                    }
+                    return error.BadRequest;
+                } else if (ch == '?') {
+                    if (query_start != null) return error.BadRequest;
+                    query_start = stream.readCount();
+                }
+            }
+        }
+        if (!found) {
+            while (stream.readCount() < read_limit) {
+                const ch = stream.readByteUnsafe();
+                if (!ascii.isGraph(ch)) {
+                    if (ch == ' ') break;
+                    return error.BadRequest;
+                } else if (ch == '?') {
+                    if (query_start != null) return error.BadRequest;
+                    query_start = stream.readCount();
+                }
             }
         }
         if (stream.readCount() >= read_limit) {

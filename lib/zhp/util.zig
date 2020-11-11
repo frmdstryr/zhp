@@ -342,30 +342,50 @@ pub const IOStream = struct {
         return self.in_buffer[self._in_start_index];
     }
 
-    pub fn readTokenUntil(self: *Self, ) ![]const u8 {
-        const start = self.readCount();
+    pub fn readUntilExpr(self: *Self, initial: u8, comptime expr: fn(ch: u8) bool, limit: usize) !u8 {
         var found = false;
-        while (self.amountBuffered() >= 8) {
-            inline for ("01234567") |_| {
-                if (try expr(self.readByteUnsafe())) {
+        var ch: u8 = initial;
+        while (!found and self.readCount() + 8 < limit) {
+            inline for("01234567") |_| {
+                if (expr(ch)) {
                     found = true;
                     break;
                 }
+                ch = self.readByteUnsafe();
             }
         }
         if (!found) {
-            while (self.amountBuffered() > 0) {
-                if (expr(self.readByteUnsafe())) {
+            while (self.readCount() < limit) {
+                if (expr(ch)) {
+                    break;
+                }
+                ch = self.readByteUnsafe();
+            }
+        }
+        return ch;
+    }
+
+    pub fn readUntilExprValidate(self: *Self, initial: u8, comptime expr: fn(ch: u8) error{InvalidCharacter}!bool, limit: usize) !u8 {
+        var found = false;
+        var ch: u8 = initial;
+        while (!found and self.readCount() + 8 < limit) {
+            inline for("01234567") |_| {
+                if (try expr(ch)) {
                     found = true;
                     break;
                 }
+                ch = self.readByteUnsafe();
             }
         }
-        const end = self.readCount();
-        if (end == self._in_end_index) {
-            return error.EndOfBuffer;
+        if (!found) {
+            while (self.readCount() < limit) {
+                if (try expr(ch)) {
+                    break;
+                }
+                ch = self.readByteUnsafe();
+            }
         }
-        return self.in_buffer[start..end];
+        return ch;
     }
 
     // ------------------------------------------------------------------------

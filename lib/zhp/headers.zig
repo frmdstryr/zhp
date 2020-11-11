@@ -264,12 +264,25 @@ pub const Headers = struct {
                     index = stream.readCount()-1;
 
                     // Read Key
-                    while (stream.readCount() < read_limit) {
+                    var found = false;
+                    while (!found and stream.readCount() + 8 < read_limit) {
                         // If we get a bad request here it's most likely because
                         // the client didn't send a \r\n after its last header
-                        if (ch == ':') break;
-                        if (!util.isTokenChar(ch)) return error.BadRequest;
-                        ch = stream.readByteUnsafe();
+                        inline for("01234567") |i| {
+                            if (ch == ':') {
+                                found = true;
+                                break;
+                            }
+                            if (!util.isTokenChar(ch)) return error.BadRequest;
+                            ch = stream.readByteUnsafe();
+                        }
+                    }
+                    if (!found) {
+                        while (stream.readCount() < read_limit) {
+                            if (ch == ':') break;
+                            if (!util.isTokenChar(ch)) return error.BadRequest;
+                            ch = stream.readByteUnsafe();
+                        }
                     }
 
                     // Header name
@@ -285,9 +298,24 @@ pub const Headers = struct {
 
             // Read value
             index = stream.readCount()-1;
-            while (stream.readCount() < read_limit) {
-                if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = stream.readByteUnsafe();
+            var found = false;
+            while (!found and stream.readCount() + 8 < read_limit) {
+                // If we get a bad request here it's most likely because
+                // the client didn't send a \r\n after its last header
+                inline for("01234567") |i| {
+                    if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) {
+                        found = true;
+                        break;
+                    }
+                    ch = stream.readByteUnsafe();
+                }
+            }
+
+            if (!found) {
+                while (stream.readCount() < read_limit) {
+                    if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
+                    ch = stream.readByteUnsafe();
+                }
             }
 
             // TODO: Strip trailing spaces and tabs?
