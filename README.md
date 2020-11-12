@@ -51,11 +51,11 @@ pub fn main() anyerror!void {
     const allocator = &gpa.allocator;
 
     var app = web.Application.init(allocator, .{.debug=true});
+    defer app.deinit();
 
     var logger = web.middleware.LoggingMiddleware{};
     try app.middleware.append(&logger.middleware);
 
-    defer app.deinit();
     try app.listen("127.0.0.1", 9000);
     try app.start();
 }
