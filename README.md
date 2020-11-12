@@ -31,6 +31,7 @@ const std = @import("std");
 const web = @import("zhp");
 
 pub const io_mode = .evented;
+pub const log_level = .info;
 
 const MainHandler = struct {
     pub fn get(self: *MainHandler, request: *web.Request, response: *web.Response) !void {

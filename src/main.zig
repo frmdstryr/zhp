@@ -7,6 +7,7 @@ const std = @import("std");
 const web = @import("zhp");
 
 pub const io_mode = .evented;
+pub const log_level = .info;
 
 const MainHandler = struct {
     pub fn get(self: *MainHandler, request: *web.Request,
@@ -197,8 +198,8 @@ pub fn main() !void {
 
     var app = web.Application.init(allocator, .{.debug=true});
 
-    //var logger = web.middleware.LoggingMiddleware{};
-    //try app.middleware.append(&logger.middleware);
+    var logger = web.middleware.LoggingMiddleware{};
+    try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
