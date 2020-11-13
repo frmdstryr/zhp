@@ -23,7 +23,6 @@ const mimetypes = web.mimetypes;
 const Request = web.Request;
 const Response = web.Response;
 const IOStream = util.IOStream;
-const Middleware = web.middleware.Middleware;
 const handlers = web.handlers;
 
 const root = @import("root");
@@ -506,6 +505,22 @@ const default_route = [_]Route{
     Route.create("index", "/", IndexHandler),
 };
 
+
+pub const Middleware = struct {
+    processRequest: ?Handler = null,
+    processResponse: ?Handler = null,
+
+    pub fn create(comptime T: type) Middleware {
+        return Middleware{
+            .processRequest = if (@hasDecl(T, "processRequest")) T.processRequest else null,
+            .processResponse = if (@hasDecl(T, "processResponse")) T.processResponse else null,
+        };
+    }
+
+};
+
+const default_middleware = [_]Middleware{};
+
 pub const Application = struct {
 
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
@@ -560,15 +575,20 @@ pub const Application = struct {
     };
 
 
+    // ------------------------------------------------------------------------
+    // Server Config
+    // ------------------------------------------------------------------------
     pub const routes: []const Route = if (@hasDecl(root, "routes"))
         sortedRoutes(root.routes[0..]) else default_route[0..];
+
+    pub const middleware: []const Middleware = if (@hasDecl(root, "middleware"))
+        root.middleware[0..] else default_middleware[0..];
+
     const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
         root.error_handler else handlers.ServerErrorHandler);
     const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))
         root.not_found_handler else handlers.NotFoundHandler);
 
-//     const middleware: []*Middleware = if (@hasDecl(root, "middleware")) root.middleware
-//         else &[_]Middleware{};
 
     pub var instance: ?*Application = null;
 
@@ -581,7 +601,6 @@ pub const Application = struct {
     request_pool: RequestPool,
     running: bool = false,
     options: Options,
-    middleware: std.ArrayList(*Middleware),
     clock: Clock = Clock{},
 
     // ------------------------------------------------------------------------
@@ -595,7 +614,6 @@ pub const Application = struct {
             .server = net.StreamServer.init(options.server_options),
             .connection_pool = ConnectionPool.init(allocator),
             .request_pool = RequestPool.init(allocator),
-            .middleware = std.ArrayList(*Middleware).init(allocator),
         };
     }
 
@@ -660,16 +678,15 @@ pub const Application = struct {
     // Routing and Middleware
     // ------------------------------------------------------------------------
     pub fn processRequest(self: *Application, server_request: *ServerRequest) !bool {
-        const request = &server_request.request;
-        const response = &server_request.response;
-
         // Let middleware process the request
         // the request body has not yet been read at this point
         // if the middleware returns true the response is considered to be
         // handled and request processing stops here
-        for (self.middleware.items) |m| {
-            const done = try m.processRequest(request, response);
-            if (done) return true;
+        inline for (middleware) |m| {
+            if (m.processRequest) |f| {
+                try f(self, server_request);
+                if (server_request.response.finished) return true;
+            }
         }
         return false;
     }
@@ -697,8 +714,10 @@ pub const Application = struct {
         // TODO: Does this need to use the lock
         try response.headers.append("Date", self.clock.value);
 
-        for (self.middleware.items) |m| {
-            _ = try m.processResponse(request, response);
+        inline for (middleware) |m| {
+            if (m.processResponse) |f| {
+                try f(self, server_request);
+            }
         }
     }
 

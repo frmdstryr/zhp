@@ -41,8 +41,12 @@ const MainHandler = struct {
 
 };
 
-const routes = [_]web.Route{
+pub const routes = [_]web.Route{
     web.Route.create("home", "/", MainHandler),
+};
+
+pub const middleware = [_]web.Middleware{
+    web.Middleware.create(web.middleware.LoggingMiddleware);
 };
 
 pub fn main() anyerror!void {
@@ -52,9 +56,6 @@ pub fn main() anyerror!void {
 
     var app = web.Application.init(allocator, .{.debug=true});
     defer app.deinit();
-
-    var logger = web.middleware.LoggingMiddleware{};
-    try app.middleware.append(&logger.middleware);
 
     try app.listen("127.0.0.1", 9000);
     try app.start();

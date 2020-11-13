@@ -16,11 +16,10 @@ pub const Response = @import("response.zig").Response;
 
 
 pub const IOStream = util.IOStream;
-pub const Middleware = middleware.Middleware;
 pub const app = @import("app.zig");
 pub const Route = app.Route;
 pub const Router = app.Router;
 pub const ServerRequest = app.ServerRequest;
 pub const Application = app.Application;
-
+pub const Middleware = app.Middleware;
 

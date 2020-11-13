@@ -191,15 +191,16 @@ pub const routes = [_]web.Route{
 };
 
 
+pub const middleware = [_]web.Middleware{
+    web.Middleware.create(web.middleware.LoggingMiddleware),
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!gpa.deinit());
     const allocator = &gpa.allocator;
 
     var app = web.Application.init(allocator, .{.debug=true});
-
-    var logger = web.middleware.LoggingMiddleware{};
-    try app.middleware.append(&logger.middleware);
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);
