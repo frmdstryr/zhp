@@ -21,4 +21,4 @@ script:
     - zig build -Drelease-safe=true install
 
     # Test example server
-    - zig run tests/bench.zig
+    #- zig run tests/bench.zig
