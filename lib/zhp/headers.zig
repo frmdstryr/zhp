@@ -114,6 +114,15 @@ const IOStream = util.IOStream;
 //     Unknown
 // };
 
+fn isColonValidateToken(ch: u8) !bool {
+    if (ch == ':') return true;
+    if (!util.isTokenChar(ch)) return error.BadRequest;
+    return false;
+}
+
+fn isControlOrPrint(ch: u8) bool {
+    return !ascii.isPrint(ch) and util.isCtrlChar(ch);
+}
 
 pub const Headers = struct {
     pub const Header = struct {
@@ -243,10 +252,10 @@ pub const Headers = struct {
 
         const limit = std.math.min(max_size, stream.amountBuffered());
         const read_limit = limit + stream.readCount();
-        // Strip any whitespace
+
         while (self.headers.items.len < self.headers.capacity) {
-            // TODO: This assumes that the whole header in the buffer
             var ch = try stream.readByteSafe();
+            defer key = null;
 
             switch (ch) {
                 '\r' => {
@@ -263,27 +272,9 @@ pub const Headers = struct {
                 else => {
                     index = stream.readCount()-1;
 
-                    // Read Key
-                    var found = false;
-                    while (!found and stream.readCount() + 8 < read_limit) {
-                        // If we get a bad request here it's most likely because
-                        // the client didn't send a \r\n after its last header
-                        inline for("01234567") |i| {
-                            if (ch == ':') {
-                                found = true;
-                                break;
-                            }
-                            if (!util.isTokenChar(ch)) return error.BadRequest;
-                            ch = stream.readByteUnsafe();
-                        }
-                    }
-                    if (!found) {
-                        while (stream.readCount() < read_limit) {
-                            if (ch == ':') break;
-                            if (!util.isTokenChar(ch)) return error.BadRequest;
-                            ch = stream.readByteUnsafe();
-                        }
-                    }
+                    // Read header name
+                    ch = try stream.readUntilExprValidate(
+                        error{BadRequest}, isColonValidateToken, ch, read_limit);
 
                     // Header name
                     key = buf.items[index..stream.readCount()-1];
@@ -298,34 +289,13 @@ pub const Headers = struct {
 
             // Read value
             index = stream.readCount()-1;
-            var found = false;
-            while (!found and stream.readCount() + 8 < read_limit) {
-                // If we get a bad request here it's most likely because
-                // the client didn't send a \r\n after its last header
-                inline for("01234567") |i| {
-                    if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) {
-                        found = true;
-                        break;
-                    }
-                    ch = stream.readByteUnsafe();
-                }
-            }
-
-            if (!found) {
-                while (stream.readCount() < read_limit) {
-                    if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                    ch = stream.readByteUnsafe();
-                }
-            }
+            ch = stream.readUntilExpr(isControlOrPrint, ch, read_limit);
 
             // TODO: Strip trailing spaces and tabs?
             value = buf.items[index..stream.readCount()-1];
 
             // Ignore any remaining non-print characters
-            while (stream.readCount() < read_limit) {
-                if (!ascii.isPrint(ch) and util.isCtrlChar(ch)) break;
-                ch = stream.readByteUnsafe();
-            }
+            ch = stream.readUntilExpr(isControlOrPrint, ch, read_limit);
 
             if (stream.readCount() >= read_limit) {
                 if (stream.isEmpty()) return error.EndOfBuffer;
@@ -342,6 +312,10 @@ pub const Headers = struct {
 
             //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
             self.appendAssumeCapacity(key.?, value.?);
+        }
+
+        if (self.headers.items.len == self.headers.capacity) {
+            return error.RequestHeaderFieldsTooLarge;
         }
     }
 

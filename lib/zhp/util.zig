@@ -342,7 +342,13 @@ pub const IOStream = struct {
         return self.in_buffer[self._in_start_index];
     }
 
-    pub fn readUntilExpr(self: *Self, initial: u8, comptime expr: fn(ch: u8) bool, limit: usize) !u8 {
+    // Read up to limit bytes from the stream buffer until the expression
+    // returns true or the limit is hit. The initial value is checked first.
+    pub fn readUntilExpr(
+            self: *Self,
+            comptime expr: fn(ch: u8) bool,
+            initial: u8,
+            limit: usize) u8 {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {
@@ -365,7 +371,15 @@ pub const IOStream = struct {
         return ch;
     }
 
-    pub fn readUntilExprValidate(self: *Self, initial: u8, comptime expr: fn(ch: u8) error{InvalidCharacter}!bool, limit: usize) !u8 {
+    // Read up to limit bytes from the stream buffer until the expression
+    // returns true or the limit is hit. The initial value is checked first.
+    // If the expression returns an error abort.
+    pub fn readUntilExprValidate(
+            self: *Self,
+            comptime ErrorType: type,
+            comptime expr: fn(ch: u8) ErrorType!bool,
+            initial: u8,
+            limit: usize) !u8 {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {

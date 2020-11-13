@@ -36,6 +36,25 @@ const V2p0 = @bitCast(u32, [4]u8{'/', '2', '.', '0'});
 const V3p0 = @bitCast(u32, [4]u8{'/', '3', '.', '0'});
 
 
+fn skipGraphFindSpaceOrQuestionMark(ch: u8) !bool {
+    if (!ascii.isGraph(ch)) {
+        return if (ch == ' ') true else error.BadRequest;
+    }
+    return ch == '?';
+}
+
+fn skipGraphFindSpace(ch: u8) !bool {
+    if (!ascii.isGraph(ch)) {
+        return if (ch == ' ') true else error.BadRequest;
+    }
+    return if (ch == '?') error.BadRequest else false;
+}
+
+fn skipHostChar(ch: u8) bool {
+    return !ascii.isAlNum(ch) and !(ch == '.' or ch == '-');
+}
+
+
 pub const Request = struct {
     pub const Content = struct {
         pub const StorageType = enum {
@@ -234,11 +253,13 @@ pub const Request = struct {
         if (ch != '\n') return error.BadRequest;
     }
 
-    fn parseMethod(self: *Request, stream: *IOStream) !void {
+    // Parses first 8 bytes and checks the space
+    pub fn parseMethod(self: *Request, stream: *IOStream) !void {
         const buf = stream.readBuffered();
         if (buf.len < 8) return error.EndOfBuffer;
         stream.skipBytes(4);
-        self.method = switch (@bitCast(u32, buf[0..4].*)) {
+        const method = @bitCast(u32, buf[0..4].*);
+        self.method = switch (method) {
             GET_ => Method.Get,
             PUT_ => Method.Put,
             POST => if (stream.readByteUnsafe() == ' ') Method.Post else Method.Unknown,
@@ -261,6 +282,7 @@ pub const Request = struct {
         if (self.method == .Unknown) return error.BadRequest;
     }
 
+    // Parses HTTP/X.Y
     pub fn parseVersion(self: *Request, stream: *IOStream) !void {
         const buf = stream.readBuffered();
         if (buf.len < 8) return error.EndOfBuffer;
@@ -282,11 +304,14 @@ pub const Request = struct {
         //@setRuntimeSafety(false); // We already check it
         const buf = self.buffer.items;
         const index = stream.readCount();
-        const read_limit = max_size + stream.readCount();
+        const limit = std.math.min(max_size, stream.amountBuffered());
+        const read_limit = limit + stream.readCount();
 
         // Bounds check, Must have "/ HTTP/x.x\n\n"
         if (stream.amountBuffered() < 12) return error.EndOfBuffer;
 
+        // Parse host if any
+        var path_start = index;
         var ch = stream.readByteUnsafe();
         switch (ch) {
             '/' => {},
@@ -312,13 +337,9 @@ pub const Request = struct {
                 }
 
                 // Read host
-                // TODO: This does not support the ip address format
                 const host_start = stream.readCount();
-                while (stream.readCount() < read_limit) {
-                    ch = try stream.readByteSafe();
-                    if (!ascii.isAlNum(ch) and ch != '.' and ch != '-') break;
-
-                }
+                ch = stream.readByteUnsafe();
+                ch = stream.readUntilExpr(skipHostChar, ch, read_limit);
                 if (stream.readCount() >= read_limit) {
                     if (stream.isEmpty()) return error.EndOfBuffer;
                     return error.RequestUriTooLong; // Too Big
@@ -333,7 +354,9 @@ pub const Request = struct {
                     }
                 }
                 if (ch != '/') return error.BadRequest;
-                self.host = buf[host_start..stream.readCount()-1];
+                path_start = stream.readCount()-1;
+                self.host = buf[host_start..path_start];
+
             },
             '*' => {
                 // The asterisk form, a simple asterisk ('*') is used with
@@ -347,60 +370,27 @@ pub const Request = struct {
             else => return error.BadRequest,
         }
 
-        const end = try self.parseUriPath(stream, max_size);
-        self.uri = buf[index..end];
-    }
+        // Read path
+        ch = try stream.readUntilExprValidate(error{BadRequest},
+                skipGraphFindSpaceOrQuestionMark, ch, read_limit);
+        var end = stream.readCount()-1;
+        self.path = buf[path_start..end];
 
-    pub fn parseUriPath(self: *Request, stream: *IOStream, max_size: usize) !usize {
-        //@setRuntimeSafety(false);
-        const buf = self.buffer.items;
-        const index = stream.readCount()-1;
-        const limit = std.math.min(max_size, stream.amountBuffered());
-        const read_limit = limit + stream.readCount();
-
-        var query_start: ?usize = null;
-
-        var found = false;
-        while (!found and stream.readCount() + 8 < read_limit) {
-            inline for("01234567") |_| {
-                const ch = stream.readByteUnsafe();
-                if (!ascii.isGraph(ch)) {
-                    if (ch == ' ') {
-                        found = true;
-                        break;
-                    }
-                    return error.BadRequest;
-                } else if (ch == '?') {
-                    if (query_start != null) return error.BadRequest;
-                    query_start = stream.readCount();
-                }
-            }
-        }
-        if (!found) {
-            while (stream.readCount() < read_limit) {
-                const ch = stream.readByteUnsafe();
-                if (!ascii.isGraph(ch)) {
-                    if (ch == ' ') break;
-                    return error.BadRequest;
-                } else if (ch == '?') {
-                    if (query_start != null) return error.BadRequest;
-                    query_start = stream.readCount();
-                }
-            }
+        // Read query
+        if (ch == '?') {
+            const q = stream.readCount();
+            ch = try stream.readByteSafe();
+            ch = try stream.readUntilExprValidate(error{BadRequest},
+                skipGraphFindSpace, ch, read_limit);
+            end = stream.readCount()-1;
+            self.query = buf[q..end];
         }
         if (stream.readCount() >= read_limit) {
             if (stream.isEmpty()) return error.EndOfBuffer;
             return error.RequestUriTooLong; // Too Big
         }
-
-        const end = stream.readCount()-1;
-        if (query_start) |q| {
-            self.query = buf[q..end];
-            self.path = buf[index..q-1];
-        } else {
-            self.path = buf[index..end];
-        }
-        return end;
+        if (ch != ' ') return error.BadRequest;
+        self.uri = buf[index..end];
     }
 
     pub fn parseContentLength(self: *Request, max_size: usize) !void {
@@ -418,9 +408,8 @@ pub const Request = struct {
             // Proxies sometimes cause Content-Length headers to get
             // duplicated.  If all the values are identical then we can
             // use them but if they differ it's an error.
-            var it = mem.split(content_length, ",");
-            if (it.next()) |piece| {
-                try headers.put("Content-Length", piece);
+            if (mem.indexOf(u8, content_length, ",")) |i| {
+                try headers.put("Content-Length", content_length[0..i]);
             }
 
             self.content_length = std.fmt.parseInt(u32, content_length, 10)
@@ -632,70 +621,187 @@ const TEST_POST_1 =
     \\
 ;
 
-const TEST_DELETE_1 =
-    \\DELETE /api/users/12/ HTTP/1.0
-    \\Host: bs.serving-sys.com
-    \\Connection: keep-alive
-    \\
-    \\
-;
 
-test "01-parse-request-line" {
+
+fn expectParseResult(buf: []const u8,  request: Request) !void {
     var buffer: [1024*1024]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
-    var stream = try IOStream.initTest(allocator, TEST_GET_1);
-    var request = try Request.initTest(allocator, &stream);
-    try request.parseTest(&stream);
+    const allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
+    var stream = try IOStream.initTest(allocator, buf);
+    var r = try Request.initTest(allocator, &stream);
+    try r.parseTest(&stream);
 
-    testing.expectEqual(request.method, Request.Method.Get);
-    testing.expectEqual(request.version, Request.Version.Http1_1);
-    testing.expectEqualSlices(u8, request.path,
-        "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
-
-    stream = try IOStream.initTest(allocator, TEST_GET_2);
-    request = try Request.initTest(allocator, &stream);
-    try request.parseTest(&stream);
-    testing.expectEqual(request.method, Request.Method.Get);
-    testing.expectEqual(request.version, Request.Version.Http1_1);
-    testing.expectEqualSlices(u8, request.uri,
-        "/pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500");
-    testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
-    testing.expectEqualSlices(u8, request.query,
-        "id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500");
-
-    stream = try IOStream.initTest(allocator, TEST_POST_1);
-    request = try Request.initTest(allocator, &stream);
-    try request.parseTest(&stream);
-    testing.expectEqual(request.method, Request.Method.Post);
-    testing.expectEqual(request.version, Request.Version.Http1_1);
-    testing.expectEqualSlices(u8, request.uri,
-        "https://bs.serving-sys.com/BurstingPipe/adServer.bs?cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1");
-    testing.expectEqualSlices(u8, request.host, "bs.serving-sys.com");
-    testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
-    testing.expectEqualSlices(u8, request.query, "cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1");
-
-    stream = try IOStream.initTest(allocator, TEST_DELETE_1);
-    request = try Request.initTest(allocator, &stream);
-    try request.parseTest(&stream);
-    testing.expectEqual(request.method, Request.Method.Delete);
-    testing.expectEqual(request.version, Request.Version.Http1_0);
-    testing.expectEqualStrings(request.path, "/api/users/12/");
-
+    testing.expectEqual(request.method, r.method);
+    testing.expectEqual(request.version, r.version);
+    if (request.scheme != .Unknown) {
+        testing.expectEqual(request.scheme, r.scheme);
+    }
+    testing.expectEqualStrings(request.uri, r.uri);
+    testing.expectEqualStrings(request.path, r.path);
+    testing.expectEqualStrings(request.query, r.query);
+    testing.expectEqualStrings(request.host, r.host);
 }
 
 fn expectParseError(err: anyerror, buf: []const u8) void {
     var buffer: [1024*1024]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
     var stream = IOStream.initTest(allocator, buf) catch unreachable;
     var request = Request.initTest(allocator, &stream) catch unreachable;
     testing.expectError(err, request.parseTest(&stream));
 }
 
+test "01-parse-request-get" {
+    try expectParseResult(
+        \\GET / HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    , .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Get,
+        .version = .Http1_1,
+        .uri = "/",
+        .path = "/",
+    });
+}
+
+test "01-parse-request-get-path" {
+    try expectParseResult(TEST_GET_1, .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Get,
+        .version = .Http1_1,
+        .uri = "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg",
+        .path = "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg",
+
+    });
+}
+
+test "01-parse-request-get-query" {
+    try expectParseResult(TEST_GET_2, .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Get,
+        .version = .Http1_1,
+        .uri = "/pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500",
+        .path = "/pixel/of_doom.png",
+        .query = "id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500"
+    });
+}
+
+test "01-parse-request-post-proxy" {
+    try expectParseResult(TEST_POST_1, .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Post,
+        .version = .Http1_1,
+        .uri = "https://bs.serving-sys.com/BurstingPipe/adServer.bs?cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1",
+        .host = "bs.serving-sys.com",
+        .path = "/BurstingPipe/adServer.bs",
+        .query = "cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1",
+    });
+}
+
+test "01-parse-request-delete" {
+    try expectParseResult(
+        \\DELETE /api/users/12/ HTTP/1.0
+        \\Host: bs.serving-sys.com
+        \\Connection: keep-alive
+        \\
+        \\
+    , .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Delete,
+        .version = .Http1_0,
+        .path = "/api/users/12/",
+        .uri = "/api/users/12/",
+    });
+}
+
+test "01-parse-request-proxy" {
+    try expectParseResult(
+        \\PUT https://127.0.0.1/upload/ HTTP/1.1
+        \\Connection: keep-alive
+        \\
+        \\
+    , .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Put,
+        .version = .Http1_1,
+        .scheme = .Https,
+        .host = "127.0.0.1",
+        .uri = "https://127.0.0.1/upload/",
+        .path = "/upload/",
+    });
+}
+
+
+test "01-parse-request-port" {
+    try expectParseResult(
+        \\PATCH https://127.0.0.1:8080/upload/ HTTP/1.1
+        \\Connection: keep-alive
+        \\
+        \\
+    , .{
+        .headers = undefined, // Dont care
+        .buffer = undefined, // Dont care
+        .client = undefined, // Dont care
+        .method = .Patch,
+        .version = .Http1_1,
+        .scheme = .Https,
+        .host = "127.0.0.1:8080",
+        .uri = "https://127.0.0.1:8080/upload/",
+        .path = "/upload/",
+    });
+}
+
 test "01-invalid-method" {
     expectParseError(error.BadRequest,
         \\GOT /this/path/is/nonsense HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+}
+
+test "01-invalid-host-char" {
+    expectParseError(error.BadRequest,
+        \\GET http://not;valid/ HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+}
+
+test "01-invalid-host-scheme" {
+    expectParseError(error.BadRequest,
+        \\GET htx://192.168.0.0/ HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+}
+
+test "01-invalid-host-scheme-1" {
+    expectParseError(error.BadRequest,
+        \\GET HTTP:/localhost/ HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+}
+
+test "01-invalid-host-port" {
+    expectParseError(error.BadRequest,
+        \\GET HTTP://localhost:aef/ HTTP/1.1
         \\Host: localhost:8000
         \\
         \\
@@ -728,6 +834,32 @@ test "01-bad-url" {
         \\
     );
 }
+
+test "01-bad-url-character" {
+    expectParseError(error.BadRequest,
+        "GET /"++ [_]u8{0} ++"/ HTTP/1.1\r\n" ++
+        "Accept: */*\r\n" ++
+        "\r\n\r\n"
+    );
+}
+
+test "01-bad-url-character-2" {
+    expectParseError(error.BadRequest,
+        "GET /\t HTTP/1.1\r\n" ++
+        "Accept: */*\r\n" ++
+        "\r\n\r\n"
+    );
+}
+
+test "01-bad-query" {
+    expectParseError(error.BadRequest,
+        \\GET /this/is?query1?query2 HTTP/1.1
+        \\Host: localhost:8000
+        \\
+        \\
+    );
+}
+
 
 test "01-empty-request-line" {
     expectParseError(error.BadRequest,
