@@ -26,6 +26,7 @@ const IOStream = util.IOStream;
 const handlers = web.handlers;
 
 const root = @import("root");
+const regex = @import("ctregex.zig");
 
 
 // A handler is simply a a factory function which returns a RequestHandler
@@ -417,8 +418,7 @@ pub const ServerConnection = struct {
 
 pub const Route = struct {
     name: []const u8, // Reverse url name
-    path: []const u8, // Path pattern
-    startswith: bool = false,
+    pattern: []const u8,
     handler: Handler,
 
     // Create a route for the handler
@@ -428,28 +428,22 @@ pub const Route = struct {
         if (path[0] != '/') {
             @compileError("Route url path must start with /");
         }
-        return Route{.name=name, .path=path, .handler=createHandler(T)};
+        return Route{
+            .name=name,
+            .pattern=path,
+            .handler=createHandler(T)
+        };
     }
 
-    pub fn static(comptime name: []const u8, comptime path: []const u8) Route {
+    pub fn static(comptime name: []const u8, comptime path: []const u8, comptime file_path: []const u8) Route {
         if (path.len < 2 or path[0] != '/' or path[path.len-1] != '/') {
             @compileError("Route url path must start and end with /");
         }
         return Route{
             .name=name,
-            .path=path,
-            .startswith=true,
-            .handler=createHandler(handlers.StaticFileHandler(path, name)),
+            .pattern=path++".*",
+            .handler=createHandler(handlers.StaticFileHandler(path, file_path)),
         };
-    }
-
-    // Check if the request path matches this route
-    pub fn matches(self: *const Route, path: []const u8) bool {
-        // TODO: This is not at all correct
-        if (self.startswith) {
-            return mem.startsWith(u8, path, self.path);
-        }
-        return mem.eql(u8, path, self.path);
     }
 
     pub fn sortLongestPath(context: void, lhs: Route, rhs: Route) bool {
@@ -579,7 +573,7 @@ pub const Application = struct {
     // Server Config
     // ------------------------------------------------------------------------
     pub const routes: []const Route = if (@hasDecl(root, "routes"))
-        sortedRoutes(root.routes[0..]) else default_route[0..];
+        root.routes[0..] else default_route[0..];
 
     pub const middleware: []const Middleware = if (@hasDecl(root, "middleware"))
         root.middleware[0..] else default_middleware[0..];
@@ -694,10 +688,14 @@ pub const Application = struct {
     pub fn execute(self: *Application, server_request: *ServerRequest) !void {
         // Inline the routing to avoid using function pointers and async call
         // which seems to have a pretty significant effect on speed
+        @setEvalBranchQuota(50000);
         const path = server_request.request.path;
         inline for (routes) |*route| {
-            if (route.matches(path)) {
+            if (try regex.match(route.pattern, .{.encoding=.ascii}, path)) |*match| {
                 //std.debug.warn("Route: name={} path={}\n", .{route.name, request.path});
+                if (match.captures.len > 0) {
+                    server_request.request.args = match.captures[0..];
+                }
                 try route.handler(self, server_request);
                 return;
             }

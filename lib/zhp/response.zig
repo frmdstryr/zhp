@@ -27,16 +27,16 @@ pub const Response = struct {
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
 
-    stream: Writer = undefined,
-
-    // Buffer for output body, if the response is too big use source_stream
-    body: Bytes,
-
     // If this is set, the response will read from the stream
     send_stream: bool = false,
 
     // Set to true if your request handler already sent everything
     finished: bool = false,
+
+    stream: Writer = undefined,
+
+    // Buffer for output body, if the response is too big use source_stream
+    body: Bytes,
 
     pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !Response {
         return Response{
@@ -58,8 +58,8 @@ pub const Response = struct {
         self.status = responses.OK;
         self.disconnect_on_finish = false;
         self.chunking_output = false;
-        self.finished = false;
         self.send_stream = false;
+        self.finished = false;
     }
 
     // Write into the body buffer

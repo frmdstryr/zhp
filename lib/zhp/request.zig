@@ -129,6 +129,9 @@ pub const Request = struct {
     // vafter which it's safe to defer processing to another thread
     read_finished: bool = false,
 
+    // Url captures
+    args: ?[]?[]const u8 = null,
+
     // All headers
     headers: Headers,
 
@@ -553,6 +556,7 @@ pub const Request = struct {
         self.head = "";
         self.content_length = 0;
         self.read_finished = false;
+        self.args = null;
         self.buffer.items.len = 0;
         self.headers.reset();
         self.cleanup();
