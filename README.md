@@ -2,19 +2,28 @@
 
 [![Build Status](https://travis-ci.org/frmdstryr/zhp.svg?branch=master)](https://travis-ci.org/frmdstryr/zhp)
 
-A Http server written in [Zig](https://ziglang.org/).  It uses a zero-copy
-parser and aims to compete with these [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http).
+A (work in progress) Http server written in [Zig](https://ziglang.org/).
+
+### Features
+
+- A zero-copy parser and aims to compete with these [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http)
+while still rejecting nonsense requests. It currently runs around ~1000MB/s.
+- Regex url routing thanks to [ctregex](https://github.com/alexnask/ctregex.zig)
+- Struct based handlers where the method maps to the function name
+- A builtin static file handler, error page handler, and not found page handler
+- Middleware support
+- Parses forms encoded with `multipart/form-data`
+- Streaming responses
 
 See how it compares in the [http benchmarks](https://gist.github.com/kprotty/3f369f46293a421f09190b829cfb48f7#file-newresults-md)
-done by kprotty.
+done by kprotty (now very old).
 
 It's a work in progress... feel free to contribute!
 
 
 ### Demo
 
-I deployed this at [https://zhp.codelv.com](https://zhp.codelv.com) if you
-want to try it out.
+Try out the demo at [https://zhp.codelv.com](https://zhp.codelv.com).
 
 > Note: If you try to benchmark the server it'll ban you, please run it locally
 > or on your own server to do benchmarks.
