@@ -10,9 +10,14 @@ pub const mimetypes = @import("mimetypes.zig");
 pub const datetime = @import("time/datetime.zig");
 pub const handlers = @import("handlers.zig");
 pub const responses = @import("status.zig");
+pub const websocket = @import("websocket.zig");
+pub const url = @import("url.zig");
+
 pub const Headers = @import("headers.zig").Headers;
 pub const Request = @import("request.zig").Request;
 pub const Response = @import("response.zig").Response;
+pub const Websocket = websocket.Websocket;
+
 
 
 pub const IOStream = util.IOStream;

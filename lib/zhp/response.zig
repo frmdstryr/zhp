@@ -70,6 +70,14 @@ pub const Response = struct {
         return bytes.len;
     }
 
+    /// Redirect to the given location
+    /// if something was written to the stream already it will be cleared
+    pub fn redirect(self: *Response, location: []const u8) !void {
+        try self.headers.put("Location", location);
+        self.status = web.responses.FOUND;
+        self.body.items.len = 0; // Erase anything that was written
+    }
+
     pub fn deinit(self: *Response) void {
         self.headers.deinit();
         self.body.deinit();

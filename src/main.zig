@@ -6,8 +6,11 @@
 const std = @import("std");
 const web = @import("zhp");
 
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
 pub const io_mode = .evented;
-pub const log_level = .info;
+//pub const log_level = .info;
 
 const MainHandler = struct {
     pub fn get(self: *MainHandler, request: *web.Request,
@@ -145,6 +148,16 @@ const ErrorTestHandler = struct {
 
 };
 
+const RedirectHandler = struct {
+    // Shows how to redirect
+    pub fn get(self: *RedirectHandler, request: *web.Request,
+               response: *web.Response) !void {
+        // Redirect to home
+        try response.redirect("/");
+    }
+
+};
+
 const FormHandler = struct {
     const template = @embedFile("templates/form.html");
     const key = "{% form %}";
@@ -198,6 +211,117 @@ const FormHandler = struct {
     }
 };
 
+
+const ChatHandler = struct {
+    const template = @embedFile("templates/chat.html");
+    pub fn get(self: *ChatHandler, request: *web.Request, response: *web.Response) !void {
+        try response.stream.writeAll(template);
+    }
+};
+
+const ChatWebsocketHandler = struct {
+    var client_id = std.atomic.Int(usize).init(0);
+    var chat_handlers = std.ArrayList(*ChatWebsocketHandler).init(&gpa.allocator);
+
+    websocket: web.Websocket,
+    stream: ?web.websocket.Writer(1024, .Text) = null,
+    username: []const u8 = "",
+
+    pub fn connected(self: *ChatWebsocketHandler) !void {
+        std.log.debug("Websocket connected!", .{});
+
+        // Initialze the stream
+        self.stream = self.websocket.writer(1024, .Text);
+        const stream = &self.stream.?;
+
+        var jw = std.json.writeStream(stream.writer(), 4);
+        try jw.beginObject();
+        try jw.objectField("type");
+        try jw.emitString("id");
+        try jw.objectField("id");
+        try jw.emitNumber(client_id.fetchAdd(1));
+        try jw.objectField("date");
+        try jw.emitNumber(std.time.milliTimestamp());
+        try jw.endObject();
+        try stream.flush();
+
+        try chat_handlers.append(self);
+    }
+
+    pub fn onMessage(self: *ChatWebsocketHandler, message: []const u8, binary: bool) !void {
+        std.log.debug("Websocket message: {}", .{message});
+        const allocator = self.websocket.response.allocator;
+        var parser = std.json.Parser.init(allocator, false);
+        defer parser.deinit();
+        var obj = try parser.parse(message);
+        defer obj.deinit();
+        const msg = obj.root.Object;
+        const t = msg.get("type").?.String;
+        if (std.mem.eql(u8, t, "message")) {
+            try self.sendMessage(self.username, msg.get("text").?.String);
+        } else if (std.mem.eql(u8, t, "username")) {
+            self.username = try std.mem.dupe(allocator, u8, msg.get("name").?.String);
+            try self.sendUserList();
+        }
+    }
+
+    pub fn sendUserList(self: *ChatWebsocketHandler) !void {
+        const t = std.time.milliTimestamp();
+        for (chat_handlers.items) |handler| {
+            const stream = &handler.stream.?;
+            var jw = std.json.writeStream(stream.writer(), 4);
+            try jw.beginObject();
+            try jw.objectField("type");
+            try jw.emitString("userlist");
+            try jw.objectField("users");
+            try jw.beginArray();
+            for (chat_handlers.items) |obj| {
+                try jw.arrayElem();
+                try jw.emitString(obj.username);
+            }
+            try jw.endArray();
+            try jw.objectField("date");
+            try jw.emitNumber(t);
+            try jw.endObject();
+            try stream.flush();
+        }
+    }
+
+    pub fn sendMessage(self: *ChatWebsocketHandler, name: []const u8, message: []const u8) !void {
+        const t = std.time.milliTimestamp();
+        for (chat_handlers.items) |handler| {
+            const stream = &handler.stream.?;
+            var jw = std.json.writeStream(stream.writer(), 4);
+            try jw.beginObject();
+            try jw.objectField("type");
+            try jw.emitString("message");
+            try jw.objectField("text");
+            try jw.emitString(message);
+            try jw.objectField("name");
+            try jw.emitString(name);
+            try jw.objectField("date");
+            try jw.emitNumber(t);
+            try jw.endObject();
+            try stream.flush();
+        }
+    }
+
+    pub fn disconnected(self: *ChatWebsocketHandler) !void {
+        if (self.websocket.err) |err| {
+            std.log.debug("Websocket error: {}", .{err});
+        } else {
+            std.log.debug("Websocket closed!", .{});
+        }
+
+        for (chat_handlers.items) |handler, i| {
+            if (handler == self) {
+                _ = chat_handlers.swapRemove(i);
+                break;
+            }
+        }
+    }
+};
+
 pub const routes = [_]web.Route{
     web.Route.create("cover", "/", TemplateHandler),
     web.Route.create("hello", "/hello", MainHandler),
@@ -205,8 +329,11 @@ pub const routes = [_]web.Route{
     web.Route.create("json", "/json/", JsonHandler),
     web.Route.create("stream", "/stream/", StreamHandler),
     web.Route.create("stream-media", "/stream/live/", StreamHandler),
+    web.Route.create("redirect", "/redirect/", RedirectHandler),
     web.Route.create("error", "/500/", ErrorTestHandler),
     web.Route.create("form", "/form/", FormHandler),
+    web.Route.create("chat", "/chat/", ChatHandler),
+    web.Route.websocket("websocket", "/chat/ws/", ChatWebsocketHandler),
     web.Route.static("static", "/static/", "src/static/"),
 };
 
@@ -216,7 +343,6 @@ pub const middleware = [_]web.Middleware{
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(!gpa.deinit());
     const allocator = &gpa.allocator;
 

@@ -247,6 +247,27 @@ pub const IOStream = struct {
         return self.in_buffer[self._in_start_index..self._in_end_index];
     }
 
+    // Read any generic type from a stream as long as it is
+    // a multiple of 8 bytes. This does a an endianness conversion if needed
+    pub fn readType(self: *Self, comptime T: type, comptime endian: std.builtin.Endian) !T {
+        const n = @sizeOf(T);
+        const I = switch (n) {
+            1 => u8,
+            2 => u16,
+            4 => u32,
+            8 => u64,
+            16 => u128,
+            else => @compileError("Not implemented"),
+        };
+        while (self.amountBuffered() < n) {
+            try self.fillBuffer();
+        }
+        const d = @bitCast(I, self.readBuffered()[0..n].*);
+        const r = if (std.builtin.endian != endian) @byteSwap(I, d) else d;
+        self.skipBytes(n);
+        return @bitCast(T, r);
+    }
+
     fn readFn(self: *Self, dest: []u8) !usize {
         //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
         if (self.unbuffered) return try self.in_file.read(dest);

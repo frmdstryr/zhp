@@ -35,6 +35,7 @@ pub const Handler = if (std.io.is_async)
     else
         fn(app: *Application, server_request: *ServerRequest) anyerror!void;
 
+
 // A utility function so the user doesn't have to use @fieldParentPtr all the time
 // This seems a bit excessive...
 pub fn createHandler(comptime T: type) Handler {
@@ -47,16 +48,23 @@ pub fn createHandler(comptime T: type) Handler {
             switch (server_request.state) {
                 .Start => {
                     const self = try response.allocator.create(T);
-                    self.* = T{};
+
+                    // Create the request handler
+                    if (@hasField(T, "server_request")) {
+                        self.* = T{
+                            .server_request = server_request
+                        };
+                    } else {
+                        self.* = T{};
+                    }
+
                     if (@bitSizeOf(T) > 0) {
                         server_request.context = @ptrToInt(self);
                     } else if (@hasDecl(T, "stream")) {
                         // We need to be able to store the pointer
                         @compileError("Stream handlers must contain context");
                     }
-                    if (@hasField(T, "server_request")) {
-                        self.server_request = server_request;
-                    }
+
                     if (@hasDecl(T, "dispatch")) {
                         return try self.dispatch(request, response);
                     } else {
@@ -415,7 +423,6 @@ pub const ServerConnection = struct {
 };
 
 
-
 pub const Route = struct {
     name: []const u8, // Reverse url name
     pattern: []const u8,
@@ -446,20 +453,12 @@ pub const Route = struct {
         };
     }
 
-    pub fn sortLongestPath(context: void, lhs: Route, rhs: Route) bool {
-        return lhs.path.len > rhs.path.len;
+    pub fn websocket(comptime name: []const u8, comptime path: []const u8, comptime T: type) Route {
+        return create(name, path, handlers.WebsocketHandler(T));
     }
+
 };
 
-// Sort routes
-pub fn sortedRoutes(comptime routes: []const Route) []const Route{
-    comptime var sorted_routes: [routes.len]Route = undefined;
-    for (routes) |r, i| {
-        sorted_routes[i] = r;
-    }
-    std.sort.sort(Route, sorted_routes[0..], {}, Route.sortLongestPath);
-    return sorted_routes[0..];
-}
 
 pub const Clock = struct {
     buffer: [32]u8 = undefined,
@@ -486,17 +485,9 @@ pub const Clock = struct {
 
 };
 
-const IndexHandler = struct {
-    pub fn get(self: *IndexHandler, request: *Request, response: *Response) !void {
-        try response.stream.writeAll(
-            \\No routes are defined
-            \\Please add a list of routes in your main zig file.
-        );
-    }
-};
 
 const default_route = [_]Route{
-    Route.create("index", "/", IndexHandler),
+    Route.create("index", "/", handlers.IndexHandler),
 };
 
 
@@ -578,11 +569,10 @@ pub const Application = struct {
     pub const middleware: []const Middleware = if (@hasDecl(root, "middleware"))
         root.middleware[0..] else default_middleware[0..];
 
-    const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
+    pub const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
         root.error_handler else handlers.ServerErrorHandler);
-    const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))
+    pub const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))
         root.not_found_handler else handlers.NotFoundHandler);
-
 
     pub var instance: ?*Application = null;
 

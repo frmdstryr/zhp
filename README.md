@@ -14,6 +14,7 @@ while still rejecting nonsense requests. It currently runs around ~1000MB/s.
 - Middleware support
 - Parses forms encoded with `multipart/form-data`
 - Streaming responses
+- Websockets
 
 See how it compares in the [http benchmarks](https://gist.github.com/kprotty/3f369f46293a421f09190b829cfb48f7#file-newresults-md)
 done by kprotty (now very old).

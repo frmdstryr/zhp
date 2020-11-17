@@ -4,6 +4,7 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
+const mem = std.mem;
 const ascii = std.ascii;
 const testing = std.testing;
 const assert = std.debug.assert;
@@ -78,3 +79,22 @@ test "url-decode" {
 }
 
 
+// Look for host in a url
+//
+pub fn findHost(url: []const u8) []const u8 {
+    var host = url;
+    if (mem.indexOf(u8, host, "://")) |start| {
+        host = host[start+3..];
+        if (mem.indexOf(u8, host, "/")) |end| {
+            host = host[0..end];
+        }
+    }
+    return host;
+}
+
+test "url-find-host" {
+    const url = "http://localhost:9000";
+    testing.expectEqualStrings("localhost:9000", findHost(url));
+    const url2 = "localhost:9000";
+    testing.expectEqualStrings("localhost:9000", findHost(url2));
+}

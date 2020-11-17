@@ -19,7 +19,7 @@ pub const LoggingMiddleware = struct {
     pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
         const request = &server_request.request;
         const response = &server_request.response;
-        // TODO: This is not async
+        if (request.method == .Unknown) return;
         log.info("{} {} {} ({}) {}", .{
             response.status.code,
             @tagName(request.method),

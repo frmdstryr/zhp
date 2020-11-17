@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Chat / Webocket Demo</title>
+		<link rel="icon" href="/static/img/favicon.ico">
+		<link rel="stylesheet" type="text/css" href="/static/css/uikit.min.css">
+	</head>
+	<body>
+		<header style="background-color: #fff; border-bottom: 1px solid #f2f2f2" data-uk-sticky="show-on-up: true; animation: uk-animation-slide-top">
+			<div class="uk-container">
+				<nav id="navbar" data-uk-navbar="mode: click;">
+					<div class="uk-navbar-center">
+						<a class="uk-navbar-item uk-logo" href="/hat/">Chat</a>
+						<a class="uk-navbar-item" href="/">Home</a>
+					</div>
+				</nav>
+			</div>
+		</header>
+
+		<section class="uk-section uk-article">
+            <div class="uk-container">
+                <div class="uk-grid-small" uk-grid>
+                    <p>Enter a username:
+                        <input id="name" type="text" maxlength="12" placeholder="Your name">
+                        <input type="button" name="login" value="Log in" onclick="connect()"></p>
+                </div>
+                <div class="uk-grid-divider uk-child-width-expand@s" uk-grid>
+                    <div id="userlistbox" class="uk-width-1-6"></div>
+                    <div class="uk-width-5-6">
+                        <iframe width="100%" height="400px" id="chatbox"></iframe>
+                    </div>
+                </div>
+                <div class="uk-grid-small" uk-grid>
+                    <p>
+                        <input type="button" id="send" name="send" value="Send" onclick="send()" disabled>
+                        <input id="text" type="text" name="text" size="80" maxlength="256" placeholder="Chat with us!" autocomplete="off"onkeyup="handleKey(event)" disabled>
+                    <p>
+                </div>
+            </div>
+        </section>
+
+		<div class="uk-position-bottom-center uk-position-small uk-visible@m uk-position-z-index">
+			<span class="uk-text-small uk-text-muted">© 2020 | Websocket demo served to you by <a href="https://github.com/frmdstryr/zhp" target="_blank">ZHP</a></span>
+		</div>
+
+		<script src="/static/js/uikit.min.js"></script>
+		<script src="/static/js/uikit-icons.min.js"></script>
+		<script>
+        // Stolen from https://github.com/mdn/samples-server/tree/master/s/websocket-chat
+		var connection = null;
+        var clientID = 0;
+
+        function setUsername() {
+            var msg = {
+                name: document.getElementById("name").value,
+                date: Date.now(),
+                id: clientID,
+                type: "username"
+            };
+            connection.send(JSON.stringify(msg));
+        }
+
+        function connect() {
+            let scheme = (document.location.protocol === "https:") ? "wss" :"ws";
+            let url = `${scheme}://${document.location.host}${document.location.pathname}ws/`;
+
+            connection = new WebSocket(url, "json");
+            connection.onopen = function(evt) {
+                document.getElementById("text").disabled = false;
+                document.getElementById("send").disabled = false;
+            };
+
+            connection.onmessage = function(evt) {
+                var f = document.getElementById("chatbox").contentDocument;
+                var text = "";
+                var msg = JSON.parse(evt.data);
+                console.log("Message received: ");
+                console.dir(msg);
+                var time = new Date(msg.date);
+                var timeStr = time.toLocaleTimeString();
+
+                switch(msg.type) {
+                case "id":
+                    clientID = msg.id;
+                    setUsername();
+                    break;
+                case "username":
+                    text = "<b>User <em>" + msg.name + "</em> signed in at " + timeStr + "</b><br>";
+                    break;
+                case "message":
+                    text = "(" + timeStr + ") <b>" + msg.name + "</b>: " + msg.text + "<br>";
+                    break;
+                case "rejectusername":
+                    text = "<b>Your username has been set to <em>" + msg.name + "</em> because the name you chose is in use.</b><br>";
+                    break;
+                case "userlist":
+                    var ul = "";
+                    var i;
+
+                    for (i=0; i < msg.users.length; i++) {
+                    ul += msg.users[i] + "<br>";
+                    }
+                    document.getElementById("userlistbox").innerHTML = ul;
+                    break;
+                }
+
+                if (text.length) {
+                    f.write(text);
+                    document.getElementById("chatbox").contentWindow.scrollByPages(1);
+                }
+            };
+        }
+
+        function send() {
+            var msg = {
+                text: document.getElementById("text").value,
+                type: "message",
+                id: clientID,
+                date: Date.now()
+            };
+            connection.send(JSON.stringify(msg));
+            document.getElementById("text").value = "";
+        }
+
+        function handleKey(evt) {
+            if (evt.keyCode === 13 || evt.keyCode === 14) {
+                if (!document.getElementById("send").disabled) {
+                    send();
+                }
+            }
+        }
+		</script>
+	</body>
+</html>
+

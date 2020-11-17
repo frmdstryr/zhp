@@ -6,6 +6,7 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
+const ascii = std.ascii;
 const log = std.log;
 const web = @import("zhp.zig");
 const responses = web.responses;
@@ -14,9 +15,19 @@ const Datetime = web.datetime.Datetime;
 pub var default_stylesheet = @embedFile("templates/style.css");
 
 
+const IndexHandler = struct {
+    pub fn get(self: *IndexHandler, request: *Request, response: *Response) !void {
+        try response.stream.writeAll(
+            \\No routes are defined
+            \\Please add a list of routes in your main zig file.
+        );
+    }
+};
+
+
 pub const ServerErrorHandler = struct {
     const template = @embedFile("templates/error.html");
-    server_request: ?*web.ServerRequest = null,
+    server_request: *web.ServerRequest,
     pub fn dispatch(self: *ServerErrorHandler, request: *web.Request,
                     response: *web.Response) anyerror!void {
         const app = web.Application.instance.?;
@@ -36,7 +47,7 @@ pub const ServerErrorHandler = struct {
             try response.stream.print(template[0..start], .{default_stylesheet});
 
             // Dump stack trace
-            if (self.server_request.?.err) |err| {
+            if (self.server_request.err) |err| {
                 try response.stream.print("error: {}\n", .{@errorName(err)});
             }
             if (@errorReturnTrace()) |trace| {
@@ -93,7 +104,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         file: ?fs.File = null,
         start: usize = 0,
         end: usize = 0,
-        server_request: ?*web.ServerRequest = null,
+        server_request: *web.ServerRequest,
 
         pub fn get(self: *Self, request: *web.Request,
                    response: *web.Response) !void {
@@ -273,6 +284,186 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {
             var handler = NotFoundHandler{};
             try handler.dispatch(request, response);
+        }
+
+    };
+}
+
+
+/// Handles a websocket connection
+/// See https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
+pub fn WebsocketHandler(comptime Protocol: type) type {
+    return struct {
+        const Self = @This();
+
+        // The app will allocate this in the response's allocator buffer
+        accept_key: [28]u8 = undefined,
+        server_request: *web.ServerRequest,
+
+        pub fn get(self: *Self, request: *web.Request, response: *web.Response) !void {
+            return self.doHandshake(request, response) catch |err| switch (err) {
+                error.BadRequest => self.respondError(web.responses.BAD_REQUEST),
+                error.Forbidden => self.respondError(web.responses.FORBIDDEN),
+                error.UpgradeRequired => self.respondError(web.responses.UPGRADE_REQUIRED),
+                else => err,
+            };
+        }
+
+        fn respondError(self: *Self, status: web.responses.Status) void {
+            self.server_request.request.read_finished = true; // Skip reading the body
+            self.server_request.response.disconnect_on_finish = true;
+            self.server_request.response.status = status;
+        }
+
+        fn doHandshake(self: *Self, request: *web.Request, response: *web.Response) !void {
+            // Check upgrade headers
+            try self.checkUpgradeHeaders(request);
+
+            // Make sure this is not a cross origin request
+            if (!self.checkOrigin(request)) {
+                return error.Forbidden; // Cross origin websockets are forbidden
+            }
+
+            // Check websocket version
+            const version = try self.getWebsocketVersion(request);
+            switch (version) {
+                7, 8, 13 => {},
+                else => {
+                    // Unsupported version
+                    // Set header to indicate to the client which versions are supported
+                    try response.headers.append("Sec-WebSocket-Version", "7, 8, 13");
+                    return error.UpgradeRequired;
+                }
+            }
+
+            // Create the accept key
+            const key = try self.getWebsocketAcceptKey(request);
+
+            // At this point the connection is valid so switch to stream mode
+            try response.headers.append("Connection", "Upgrade");
+            try response.headers.append("Upgrade", "websocket");
+            try response.headers.append("Sec-WebSocket-Accept", key);
+            response.send_stream = true;
+            response.status = web.responses.SWITCHING_PROTOCOLS;
+        }
+
+        fn checkUpgradeHeaders(self: *Self, request: *web.Request) !void {
+            if (!request.headers.eqlIgnoreCase("Upgrade", "websocket")) {
+                log.debug("Cannot only upgrade to 'websocket'", .{});
+                return error.BadRequest; // Can only upgrade to websocket
+            }
+
+            // Some proxies/load balancers will mess with the connection header
+            // and browsers also send multiple values here
+            const header = request.headers.getDefault("Connection", "");
+            var it = std.mem.split(header, ",");
+            while (it.next()) |part| {
+                const conn = std.mem.trim(u8, part, " ");
+                if (ascii.eqlIgnoreCase(conn, "upgrade")) {
+                    return;
+                }
+            }
+            // If we didn't find it, give an error
+            log.debug("Connection must be 'upgrade'", .{});
+            return error.BadRequest; // Connection must be upgrade
+        }
+
+        /// As a safety measure make sure the origin header matches the host header
+        fn checkOrigin(self: *Self, request: *web.Request) bool {
+            if (@hasDecl(Protocol, "checkOrigin")) {
+                return Protocol.checkOrigin(request);
+            } else {
+                // Version 13 uses "Origin", others use "Sec-Websocket-Origin"
+                var origin = web.url.findHost(
+                    if (request.headers.getOptional("Origin")) |o| o else
+                        request.headers.getDefault("Sec-Websocket-Origin", ""));
+
+                const host = request.headers.getDefault("Host", "");
+                if (origin.len == 0 or host.len == 0 or !ascii.eqlIgnoreCase(origin, host)) {
+                    log.debug("Cross origin websockets are not allowed ('{}' != '{}')", .{
+                        origin, host
+                    });
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        fn getWebsocketVersion(self: *Self, request: *web.Request) !u8 {
+            const v = request.headers.getDefault("Sec-WebSocket-Version", "");
+            return std.fmt.parseInt(u8, v, 10) catch error.BadRequest;
+        }
+
+        fn getWebsocketAcceptKey(self: *Self, request: *web.Request) ![]const u8 {
+            const key = request.headers.getDefault("Sec-WebSocket-Key", "");
+            if (key.len < 8) {
+                // TODO: Must it be a certain length?
+                log.debug("Insufficent websocket key length", .{});
+                return error.BadRequest;
+            }
+
+            var hash = std.crypto.hash.Sha1.init(.{});
+            var out: [20]u8 = undefined;
+            hash.update(key);
+            hash.update("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            hash.final(&out);
+
+            // Encode it
+            std.base64.standard_encoder.encode(&self.accept_key, &out);
+            return self.accept_key[0..];
+        }
+
+        pub fn stream(self: *Self, io: *web.IOStream) !usize {
+            const request = &self.server_request.request;
+            const response = &self.server_request.response;
+
+            // Always close
+            defer io.close();
+
+            // Flush the request
+            try io.flush();
+
+            // Delegate handler
+            var protocol = Protocol{
+                .websocket = web.Websocket{
+                    .request = request,
+                    .response = response,
+                    .io = io,
+                },
+            };
+            try protocol.connected();
+            self.processStream(&protocol) catch |err| {
+                protocol.websocket.err = err;
+            };
+            try protocol.disconnected();
+            return 0;
+        }
+
+        fn processStream(self: *Self, protocol: *Protocol) !void {
+            const ws = &protocol.websocket;
+            while (true) {
+                const dataframe = try ws.readDataFrame();
+                if (@hasDecl(Protocol, "onDataFrame")) {
+                    // Let the user handle it
+                    try protocol.onDataFrame(dataframe);
+                } else {
+                    switch (dataframe.header.opcode) {
+                        .Text => try protocol.onMessage(dataframe.data, false),
+                        .Binary => try protocol.onMessage(dataframe.data, true),
+                        .Ping => {
+                            _ = try ws.writeMessage(.Pong, "");
+                        },
+                        .Pong => {
+                            _ = try ws.writeMessage(.Ping, "");
+                        },
+                        .Close => {
+                            try ws.close(1000);
+                            break; // Client requsted close
+                        },
+                        else => return error.UnexpectedOpcode,
+                    }
+                }
+            }
         }
 
     };
