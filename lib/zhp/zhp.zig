@@ -14,6 +14,7 @@ pub const websocket = @import("websocket.zig");
 pub const url = @import("url.zig");
 
 pub const Headers = @import("headers.zig").Headers;
+pub const Cookies = @import("cookies.zig").Cookies;
 pub const Request = @import("request.zig").Request;
 pub const Response = @import("response.zig").Response;
 pub const Websocket = websocket.Websocket;

@@ -59,7 +59,7 @@ pub fn createHandler(comptime T: type) Handler {
                     }
 
                     if (@bitSizeOf(T) > 0) {
-                        server_request.context = @ptrToInt(self);
+                        server_request.handler = @ptrToInt(self);
                     } else if (@hasDecl(T, "stream")) {
                         // We need to be able to store the pointer
                         @compileError("Stream handlers must contain context");
@@ -83,7 +83,7 @@ pub fn createHandler(comptime T: type) Handler {
                 },
                 .Finish => {
                     if (@hasDecl(T, "stream")) {
-                        if (server_request.context) |addr| {
+                        if (server_request.handler) |addr| {
                             const self = @intToPtr(*T, addr);
                             _ = try self.stream(server_request.stream.?);
                             return;
@@ -118,8 +118,11 @@ pub const ServerRequest = struct {
     response: Response,
     stream: ?*IOStream = null,
 
+    // Pointer to the handler that is used for streaming
     state: State = .Start,
-    context: ?usize = null,
+    handler: ?usize = null,
+
+    // Request parse error or some handler error
     err: ?anyerror = null,
 
     pub fn init(allocator: *Allocator, app: *Application) !ServerRequest {
@@ -131,7 +134,8 @@ pub const ServerRequest = struct {
             .request = try Request.initCapacity(
                 allocator,
                 app.options.request_buffer_size,
-                app.options.max_header_count),
+                app.options.max_header_count,
+                app.options.max_cookie_count),
             .response = try Response.initCapacity(
                 allocator,
                 app.options.response_buffer_size,
@@ -156,7 +160,7 @@ pub const ServerRequest = struct {
         self.request.reset();
         self.response.reset();
         self.err = null;
-        self.context = null;
+        self.handler = null;
         self.state = .Start;
     }
 
@@ -518,7 +522,8 @@ pub const Application = struct {
         chunk_size: u32 = 65536,
 
         /// Will only parse this many request headers
-        max_header_count: u8 = 32,
+        max_header_count: usize = 32,
+        max_cookie_count: usize = 32,
 
         // If headers are longer than this return a request headers too large error
         max_request_headers_size: u32 = 10*1024,

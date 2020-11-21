@@ -37,7 +37,7 @@ pub fn main() anyerror!void {
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
     var stream = try web.IOStream.initCapacity(allocator, conn.file, 0, 4096);
     defer stream.deinit();
-    var request = try web.Request.initCapacity(allocator, 1024*10, 32);
+    var request = try web.Request.initCapacity(allocator, 1024*10, 32, 32);
     defer request.deinit();
     var cnt: usize = 0;
     while (true) {

@@ -161,6 +161,14 @@ pub const Headers = struct {
         try std.fmt.format(out_stream, "}}", .{});
     }
 
+    // Get the index of the  key
+    pub fn lookup(self: *Headers, key: []const u8) !usize {
+        for (self.headers.items) |header, i| {
+            if (ascii.eqlIgnoreCase(header.key, key)) return i;
+        }
+        return error.KeyError;
+    }
+
     // Get the value for the given key
     pub fn get(self: *Headers, key: []const u8) ![]const u8 {
         const i = try self.lookup(key);
@@ -169,15 +177,6 @@ pub const Headers = struct {
 
     pub fn getOptional(self: *Headers, key: []const u8) ?[]const u8 {
         return self.get(key) catch null;
-    }
-
-    // Get the index of the  key
-    pub fn lookup(self: *Headers, key: []const u8) !usize {
-        var headers = self.headers.items;
-        for (headers) |header, i| {
-            if (ascii.eqlIgnoreCase(header.key, key)) return i;
-        }
-        return error.KeyError;
     }
 
     pub fn getDefault(self: *Headers, key: []const u8,

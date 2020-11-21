@@ -12,8 +12,20 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const io_mode = .evented;
 //pub const log_level = .info;
 
-const MainHandler = struct {
-    pub fn get(self: *MainHandler, request: *web.Request,
+
+const TemplateHandler = struct {
+    const template = @embedFile("templates/cover.html");
+
+    pub fn get(self: *TemplateHandler, request: *web.Request,
+               response: *web.Response) !void {
+        @setEvalBranchQuota(100000);
+        try response.stream.print(template, .{"ZHP"});
+    }
+
+};
+
+const HelloHandler = struct {
+    pub fn get(self: *HelloHandler, request: *web.Request,
                response: *web.Response) !void {
         try response.headers.append("Content-Type", "text/plain");
         try response.stream.writeAll("Hello, World!");
@@ -90,18 +102,6 @@ const StreamHandler = struct {
 
 };
 
-
-const TemplateHandler = struct {
-    const template = @embedFile("templates/cover.html");
-
-    pub fn get(self: *TemplateHandler, request: *web.Request,
-               response: *web.Response) !void {
-        @setEvalBranchQuota(100000);
-        try response.stream.print(template, .{"ZHP"});
-    }
-
-};
-
 const JsonHandler = struct {
     // Static storage
     var counter = std.atomic.Int(usize).init(0);
@@ -116,6 +116,20 @@ const JsonHandler = struct {
             try jw.objectField(h.key);
             try jw.emitString(h.value);
         }
+
+        // Cookies aren't parsed by default
+        // If you know they're parsed (eg by middleware) you can just
+        // use request.cookies directly
+        if (try request.readCookies()) |cookies| {
+            try jw.objectField("Cookie");
+            try jw.beginObject();
+            for (cookies.cookies.items) |c| {
+                try jw.objectField(c.key);
+                try jw.emitString(c.value);
+            }
+            try jw.endObject();
+        }
+
         try jw.objectField("Request-Count");
         try jw.emitNumber(counter.fetchAdd(1));
 
@@ -324,7 +338,7 @@ const ChatWebsocketHandler = struct {
 
 pub const routes = [_]web.Route{
     web.Route.create("cover", "/", TemplateHandler),
-    web.Route.create("hello", "/hello", MainHandler),
+    web.Route.create("hello", "/hello", HelloHandler),
     web.Route.create("api", "/api/([a-z]+)/(\\d+)/", ApiHandler),
     web.Route.create("json", "/json/", JsonHandler),
     web.Route.create("stream", "/stream/", StreamHandler),

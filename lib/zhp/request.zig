@@ -14,6 +14,7 @@ const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const AtomicFile = std.fs.AtomicFile;
 const Headers = @import("headers.zig").Headers;
+const Cookies = @import("cookies.zig").Cookies;
 
 const util = @import("util.zig");
 const Bytes = util.Bytes;
@@ -69,8 +70,13 @@ pub const Request = struct {
     };
 
     pub const ParseOptions = struct {
+        // If request line is longer than this throw an error
         max_request_line_size: usize = 2048,
+
+        // If the whole request header is larger than this throw an error
         max_header_size: usize = 10*1024,
+
+        // If the content length is larger than this throw an error
         max_content_length: usize = 1000*1024*1024,
     };
 
@@ -126,7 +132,7 @@ pub const Request = struct {
     content_length: usize = 0,
 
     // Set once the read is complete and no more reads will be done on the
-    // vafter which it's safe to defer processing to another thread
+    // after which it's safe to defer processing to another thread
     read_finished: bool = false,
 
     // Url captures
@@ -135,26 +141,33 @@ pub const Request = struct {
     // All headers
     headers: Headers,
 
+    // Cookies
+    // this is not parsed by default, if you need cookies use readCookies
+    cookies: Cookies,
+
     // Holds the whole request (for now)
     buffer: Bytes,
 
+    // Stream used for reading
     stream: ?*IOStream = null,
 
     // Body of request will be one of these depending on the size
     content: ?Content = null,
 
     // Client address
-    client: Address,
+    client: Address = undefined,
 
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-    pub fn initCapacity(allocator: *Allocator, buffer_size: usize,
-                        max_headers: usize) !Request {
+    pub fn initCapacity(allocator: *Allocator,
+                        buffer_size: usize,
+                        max_headers: usize,
+                        max_cookies: usize) !Request {
         return Request{
             .buffer = try Bytes.initCapacity(allocator, buffer_size),
-            .client = try Address.parseIp("0.0.0.0", 80),
             .headers = try Headers.initCapacity(allocator, max_headers),
+            .cookies = try Cookies.initCapacity(allocator, max_cookies),
         };
     }
 
@@ -165,8 +178,8 @@ pub const Request = struct {
         //if (!builtin.is_test) @compileError("This is for testing only");
         return Request{
             .buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer),
-            .client = try Address.parseIp("0.0.0.0", 80),
             .headers = try Headers.initCapacity(allocator, 64),
+            .cookies = try Cookies.initCapacity(allocator, 64),
         };
     }
 
@@ -424,9 +437,16 @@ pub const Request = struct {
         } // Should already be 0
     }
 
-    //pub fn parseCookie(self: *Request) !void {
-    //    // TODO Do while parsing headers
-    //}
+    // Read the cookie header and return a pointer to the cookies if
+    // they exist
+    pub fn readCookies(self: *Request) !?*Cookies {
+        if (self.cookies.parsed) return &self.cookies;
+        if (self.headers.getOptional("Cookie")) |header| {
+            try self.cookies.parse(header);
+            return &self.cookies;
+        }
+        return null;
+    }
 
     pub fn readBody(self: *Request, stream: *IOStream) !void {
         defer self.read_finished = true;
@@ -559,6 +579,7 @@ pub const Request = struct {
         self.args = null;
         self.buffer.items.len = 0;
         self.headers.reset();
+        self.cookies.reset();
         self.cleanup();
     }
 
@@ -577,6 +598,7 @@ pub const Request = struct {
     pub fn deinit(self: *Request) void {
         self.buffer.deinit();
         self.headers.deinit();
+        self.cookies.deinit();
         self.cleanup();
     }
 
@@ -663,6 +685,7 @@ test "01-parse-request-get" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Get,
         .version = .Http1_1,
         .uri = "/",
@@ -675,6 +698,7 @@ test "01-parse-request-get-path" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Get,
         .version = .Http1_1,
         .uri = "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg",
@@ -688,6 +712,7 @@ test "01-parse-request-get-query" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Get,
         .version = .Http1_1,
         .uri = "/pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500",
@@ -701,6 +726,7 @@ test "01-parse-request-post-proxy" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Post,
         .version = .Http1_1,
         .uri = "https://bs.serving-sys.com/BurstingPipe/adServer.bs?cn=tf&c=19&mc=imp&pli=9994987&PluID=0&ord=1400862593644&rtu=-1",
@@ -721,6 +747,7 @@ test "01-parse-request-delete" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Delete,
         .version = .Http1_0,
         .path = "/api/users/12/",
@@ -738,6 +765,7 @@ test "01-parse-request-proxy" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Put,
         .version = .Http1_1,
         .scheme = .Https,
@@ -758,6 +786,7 @@ test "01-parse-request-port" {
         .headers = undefined, // Dont care
         .buffer = undefined, // Dont care
         .client = undefined, // Dont care
+        .cookies = undefined, // Don't care
         .method = .Patch,
         .version = .Http1_1,
         .scheme = .Https,
@@ -1045,12 +1074,17 @@ test "04-parse-request-headers" {
     testing.expectEqualSlices(u8, "keep-alive",
         try h.get("Connection"));
 
+}
 
-    // Next
-    try stream.load(allocator, TEST_GET_1);
-    request = try Request.initTest(allocator, &stream);
+test "04-parse-request-cookies" {
+    var buffer: [1024*1024]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const allocator = &fba.allocator;
+
+    var stream = try IOStream.initTest(allocator, TEST_GET_1);
+    var request = try Request.initTest(allocator, &stream);
     try request.parseTest(&stream);
-    h = &request.headers;
+    const h = &request.headers;
 
     testing.expectEqual(@as(usize, 9), h.headers.items.len);
 
@@ -1074,6 +1108,12 @@ test "04-parse-request-headers" {
         "__utma=xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x; " ++
         "__utmz=xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral",
         try h.get("Cookie"));
+
+    const cookies = (try request.readCookies()).?;
+    testing.expectEqualStrings("2", try cookies.get("wp_ozh_wsa_visits"));
+    testing.expectEqualStrings("xxxxxxxxxx", try cookies.get("wp_ozh_wsa_visit_lasttime"));
+    testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x", try cookies.get("__utma"));
+    testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral", try cookies.get("__utmz"));
 
 }
 
