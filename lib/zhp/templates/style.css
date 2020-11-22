@@ -8,6 +8,6 @@ pre {
     color: #333;
     font-size: 1rem;
     font-family: consolas,monaco,"Andale Mono",monospace;
-    overflow: wrap;
+    overflow: auto;
     padding: 1em;
 }

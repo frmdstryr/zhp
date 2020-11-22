@@ -12,6 +12,7 @@ pub const handlers = @import("handlers.zig");
 pub const responses = @import("status.zig");
 pub const websocket = @import("websocket.zig");
 pub const url = @import("url.zig");
+pub const template = @import("template.zig");
 
 pub const Headers = @import("headers.zig").Headers;
 pub const Cookies = @import("cookies.zig").Cookies;

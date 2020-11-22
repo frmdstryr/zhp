@@ -26,8 +26,14 @@ pub const IndexHandler = struct {
 
 
 pub const ServerErrorHandler = struct {
-    const template = @embedFile("templates/error.html");
+    const TemplateContext = struct {
+        style: []const u8,
+        request: *web.Request,
+    };
+    const template = web.template.FileTemplate(TemplateContext , "templates/error.html");
+
     server_request: *web.ServerRequest,
+
     pub fn dispatch(self: *ServerErrorHandler, request: *web.Request,
                     response: *web.Response) anyerror!void {
         const app = web.Application.instance.?;
@@ -36,31 +42,29 @@ pub const ServerErrorHandler = struct {
         // Clear any existing data
         try response.body.resize(0);
 
-        // Split the template on the key
-        comptime const key = "{% stacktrace %}";
-        comptime const start = mem.indexOf(u8, template, key).?;
-        comptime const end = start + key.len;
-        //@breakpoint();
 
         if (app.options.debug) {
-            // Send it
-            try response.stream.print(template[0..start], .{default_stylesheet});
+            // Split the template on the key
+            const context = TemplateContext{.style=default_stylesheet, .request=request};
 
-            // Dump stack trace
-            if (self.server_request.err) |err| {
-                try response.stream.print("error: {}\n", .{@errorName(err)});
+            inline for (template.sections) |part| {
+                if (part.is("stacktrace")) {
+                    // Dump stack trace
+                    if (self.server_request.err) |err| {
+                        try response.stream.print("error: {}\n", .{@errorName(err)});
+                    }
+                    if (@errorReturnTrace()) |trace| {
+                        try std.debug.writeStackTrace(
+                            trace.*,
+                            &response.stream,
+                            response.allocator,
+                            try std.debug.getSelfDebugInfo(),
+                            .no_color);
+                    }
+                } else {
+                    try part.render(context, response.stream);
+                }
             }
-            if (@errorReturnTrace()) |trace| {
-                try std.debug.writeStackTrace(
-                    trace.*,
-                    &response.stream,
-                    response.allocator,
-                    try std.debug.getSelfDebugInfo(),
-                    .no_color);
-            }
-
-            // Dump request and end of page
-            try response.stream.print(template[end..], .{request});
         } else {
             if (@errorReturnTrace()) |trace| {
                 const stderr = std.io.getStdErr().writer();

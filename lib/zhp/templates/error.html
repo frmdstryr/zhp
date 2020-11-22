@@ -3,13 +3,13 @@
     <head>
         <meta charset="utf-8">
         <title>Server Error</title>
-        <style>{}</style>
+        <style>{{style}}</style>
     </head>
     <body>
         <h1>Server Error</h1>
         <h3>Stacktrace</h3>
-        <pre>{% stacktrace %}</pre>
+        <pre>{% yield stacktrace %}</pre>
         <h3>Request</h3>
-        <pre>{}</pre>
+        <pre>{{request}}</pre>
     </body>
 </body>
