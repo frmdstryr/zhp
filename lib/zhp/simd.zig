@@ -97,13 +97,10 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
     const first = @splat(n, delimiter[0]);
     const last = @splat(n, delimiter[k-1]);
 
-    if (buf.len < n) {
-        return std.mem.indexOfPos(T, buf, start_index, delimiter);
-    }
-
     var end: usize = start_index + n;
+    var start: usize = end - n;
     while (end < buf.len) {
-        const start = end - n;
+        start = end - n;
         const last_end = std.math.min(end+k-1, buf.len);
         const last_start = last_end - n;
 
@@ -121,6 +118,7 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
         }
         end = std.math.min(end + n, buf.len);
     }
+    if (start < buf.len) return std.mem.indexOfPos(T, buf, start_index, delimiter);
     return null; // Not found
 }
 
