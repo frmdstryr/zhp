@@ -313,7 +313,7 @@ pub const Headers = struct {
             self.appendAssumeCapacity(key.?, value.?);
         }
 
-        if (self.headers.items.len == self.headers.capacity) {
+        if (self.headers.items.len > self.headers.capacity) {
             return error.RequestHeaderFieldsTooLarge;
         }
     }
