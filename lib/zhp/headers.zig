@@ -251,6 +251,7 @@ pub const Headers = struct {
 
         const limit = std.math.min(max_size, stream.amountBuffered());
         const read_limit = limit + stream.readCount();
+        var read_all_headers: bool = false;
 
         while (self.headers.items.len < self.headers.capacity) {
             var ch = try stream.readByteSafe();
@@ -260,9 +261,13 @@ pub const Headers = struct {
                 '\r' => {
                     ch = try stream.readByteSafe();
                     if (ch != '\n') return error.BadRequest;
+                    read_all_headers = true;
                     break; // Empty line, we're done
                 },
-                '\n' => break, // Empty line, we're done
+                '\n' => {
+                    read_all_headers = true;
+                    break; // Empty line, we're done
+                },
                 ' ', '\t' => {
                     // Continuation of multi line header
                     if (key == null) return error.BadRequest;
@@ -313,7 +318,8 @@ pub const Headers = struct {
             self.appendAssumeCapacity(key.?, value.?);
         }
 
-        if (self.headers.items.len > self.headers.capacity) {
+        if (!read_all_headers) {
+            // If you hit this the capacity needs increased
             return error.RequestHeaderFieldsTooLarge;
         }
     }

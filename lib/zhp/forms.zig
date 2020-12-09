@@ -104,9 +104,9 @@ pub const Form = struct {
         var fields = simd.split(data[0..final_boundary_index.?], separator);
 
         // TODO: Make these default capacities configurable
-        var headers = try Headers.initCapacity(self.allocator, 2);
+        var headers = try Headers.initCapacity(self.allocator, 8);
         defer headers.deinit();
-        var disp_params = try Headers.initCapacity(self.allocator, 2);
+        var disp_params = try Headers.initCapacity(self.allocator, 8);
         defer disp_params.deinit();
 
         while (fields.next()) |part| {
