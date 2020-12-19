@@ -126,7 +126,6 @@ pub const Form = struct {
             headers.reset();
             try headers.parseBuffer(body, body.len+1);
 
-
             const disp_header = headers.getDefault("Content-Disposition", "");
             disp_params.reset(); // NOTE: Do not free, data is assumed to be owned
             const disposition = try parseHeader(self.allocator, disp_header, &disp_params);
