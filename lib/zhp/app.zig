@@ -255,6 +255,7 @@ pub const ServerConnection = struct {
         // Start serving requests
         while (true) {
             defer server_request.reset();
+            var processed_response = false;
 
             // Parse the request line and headers
             request.parse(&self.io, options) catch |err| {
@@ -276,6 +277,12 @@ pub const ServerConnection = struct {
             // if this is null it means that handler should not be used
             // as one of the middleware handlers took care of it
             const intercepted = try app.processRequest(server_request);
+
+            // Let middleware cleanup
+            errdefer if (!processed_response) app.processResponse(server_request) catch |err| {
+                log.err("unexpected processing response: {}", .{@errorName(err)});
+            };
+
             if (server_request.err == null and !intercepted) {
                 app.execute(server_request) catch |err| {
                     server_request.err = err;
@@ -316,6 +323,7 @@ pub const ServerConnection = struct {
             }
 
             // Let middleware process the response
+            processed_response = true;
             try app.processResponse(server_request);
 
             // Request handler already sent the response
@@ -368,7 +376,7 @@ pub const ServerConnection = struct {
         }
 
         // End of headers
-        _ = try stream.write("\r\n");
+        try stream.writeAll("\r\n");
 
         server_request.state = .Finish;
 
@@ -620,7 +628,7 @@ pub const Application = struct {
 
         // Ignore sigpipe
         var act = os.Sigaction{
-            .sigaction = os.SIG_IGN,
+            .handler = .{.sigaction = os.SIG_IGN },
             .mask = os.empty_sigset,
             .flags = 0,
         };
