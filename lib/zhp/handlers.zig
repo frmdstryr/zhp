@@ -105,7 +105,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
     return  struct {
         const Self = @This();
         //handler: web.RequestHandler,
-        file: ?fs.File = null,
+        stream: ?net.Stream = null,
         start: usize = 0,
         end: usize = 0,
         server_request: *web.ServerRequest,

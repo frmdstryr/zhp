@@ -8,7 +8,7 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const File = std.fs.File;
+const Stream = std.net.Stream;
 const assert = std.debug.assert;
 
 pub const Bytes = std.ArrayList(u8);
@@ -53,9 +53,9 @@ pub inline fn isTokenChar(ch: u8) bool {
 }
 
 pub const IOStream = struct {
-    pub const invalid_file = File{.handle=0};
-    pub const Error = File.WriteError;
-    pub const ReadError = File.ReadError;
+    pub const invalid_stream = Stream{.handle=0};
+    pub const Error = Stream.WriteError;
+    pub const ReadError = Stream.ReadError;
     const Self = @This();
 
     allocator: ?*Allocator = null,
@@ -69,27 +69,27 @@ pub const IOStream = struct {
     closed: bool = false,
     owns_in_buffer: bool = true,
     unbuffered: bool = false,
-    in_file: File,
-    out_file: File,
+    in_stream: Stream,
+    out_stream: Stream,
 
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-    pub fn init(file: File) IOStream {
+    pub fn init(stream: Stream) IOStream {
         return IOStream{
-            .in_file = file,
-            .out_file = file,
+            .in_stream = stream,
+            .out_stream = stream,
             .in_buffer = &[_]u8{},
             .out_buffer = &[_]u8{},
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, file: ?File,
+    pub fn initCapacity(allocator: *Allocator, stream: Stream,
                         in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_file = if (file) |f| f else try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
-            .out_file = if (file) |f| f else try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
+            .in_stream = s,
+            .out_stream = s,
             .in_buffer = try allocator.alloc(u8, in_capacity),
             .out_buffer = try allocator.alloc(u8, out_capacity),
             .owns_in_buffer = in_capacity == 0,
@@ -102,8 +102,8 @@ pub const IOStream = struct {
     // the buffer must exist for the lifetime of the stream (or until swapped)
     pub fn fromBuffer(in_buffer: []u8) IOStream {
         return IOStream{
-            .in_file = invalid_file,
-            .out_file = invalid_file,
+            .in_stream = invalid_stream,
+            .out_stream = invalid_stream,
             .in_buffer = in_buffer,
             .owns_in_buffer = false,
             ._in_start_index = 0,
@@ -117,8 +117,8 @@ pub const IOStream = struct {
     pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_file = try std.fs.openFileAbsolute("/dev/null", .{.read=true}),
-            .out_file = try std.fs.openFileAbsolute("/dev/null", .{.write=true}),
+            .in_stream = try std.fs.openStreamAbsolute("/dev/null", .{.read=true}),
+            .out_stream = try std.fs.openStreamAbsolute("/dev/null", .{.write=true}),
             .in_buffer = try mem.dupe(allocator, u8, in_buffer),
             .owns_in_buffer = in_buffer.len > 0,
             ._in_start_index = 0,
@@ -145,10 +145,10 @@ pub const IOStream = struct {
     }
 
     // Reset the the initial state without reallocating
-    pub fn reinit(self: *Self, file: File) void {
+    pub fn reinit(self: *Self, stream: Stream) void {
         self.close(); // Close old files
-        self.in_file = file;
-        self.out_file = file;
+        self.in_stream = file;
+        self.out_stream = file;
         self._in_start_index = self.in_buffer.len;
         self._in_end_index = self.in_buffer.len;
         self._in_count = 0;
@@ -213,7 +213,7 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // Reader
     // ------------------------------------------------------------------------
-    pub const Reader = std.io.Reader(*IOStream, File.ReadError, IOStream.readFn);
+    pub const Reader = std.io.Reader(*IOStream, Stream.ReadError, IOStream.readFn);
 
     pub fn reader(self: *Self) Reader {
         return Reader{.context=self};
@@ -270,7 +270,7 @@ pub const IOStream = struct {
 
     fn readFn(self: *Self, dest: []u8) !usize {
         //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
-        if (self.unbuffered) return try self.in_file.read(dest);
+        if (self.unbuffered) return try self.in_stream.read(dest);
 
         // Hot path for one byte reads
         if (dest.len == 1 and self._in_end_index > self._in_start_index) {
@@ -297,7 +297,7 @@ pub const IOStream = struct {
                 // we can read more data from the unbuffered stream
                 if (dest_space < self.in_buffer.len) {
                     self._in_start_index = 0;
-                    self._in_end_index = try self.in_file.read(self.in_buffer[0..]);
+                    self._in_end_index = try self.in_stream.read(self.in_buffer[0..]);
                     //self._in_count += self._in_end_index;
 
                     // Shortcut
@@ -309,7 +309,7 @@ pub const IOStream = struct {
                 } else {
                     // asking for so much data that buffering is actually less efficient.
                     // forward the request directly to the unbuffered stream
-                    const amt_read = try self.in_file.read(dest[dest_index..]);
+                    const amt_read = try self.in_stream.read(dest[dest_index..]);
                     //self._in_count += amt_read;
                     return dest_index + amt_read;
                 }
@@ -426,7 +426,7 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // OutStream
     // ------------------------------------------------------------------------
-    pub const Writer = std.io.Writer(*IOStream, File.WriteError, IOStream.writeFn);
+    pub const Writer = std.io.Writer(*IOStream, Stream.WriteError, IOStream.writeFn);
 
     pub fn writer(self: *Self) Writer {
         return Writer{.context=self};
@@ -442,7 +442,7 @@ pub const IOStream = struct {
             return @as(usize, 1);
         } else if (bytes.len >= self.out_buffer.len) {
             try self.flush();
-            return self.out_file.write(bytes);
+            return self.out_stream.write(bytes);
         }
         var src_index: usize = 0;
 
@@ -461,7 +461,7 @@ pub const IOStream = struct {
     }
 
     pub fn flush(self: *Self) !void {
-        try self.out_file.writeAll(self.out_buffer[0..self._out_index]);
+        try self.out_stream.writeAll(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
     }
 
@@ -495,9 +495,9 @@ pub const IOStream = struct {
     pub fn close(self: *Self) void {
         if (self.closed) return;
         self.closed = true;
-        self.in_file.close();
-        if (self.in_file.handle != self.out_file.handle) {
-            self.out_file.close();
+        self.in_stream.close();
+        if (self.in_stream.handle != self.out_stream.handle) {
+            self.out_stream.close();
         }
     }
 

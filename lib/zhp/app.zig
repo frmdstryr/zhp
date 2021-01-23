@@ -217,7 +217,7 @@ pub const ServerConnection = struct {
         const app = self.application;
         const params = &app.options;
         const stream = &self.io.writer();
-        self.io.reinit(conn.file);
+        self.io.reinit(conn.stream);
         defer self.io.close();
         defer self.release();
 

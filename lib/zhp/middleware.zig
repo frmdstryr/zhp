@@ -28,3 +28,25 @@ pub const LoggingMiddleware = struct {
             response.body.items.len});
     }
 };
+
+
+pub const SessionMiddleware = struct {
+    // If you want storage use it statically
+
+    pub fn processRequest(app: *Application, server_request: *ServerRequest) !void {
+
+    }
+
+    pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
+        const request = &server_request.request;
+        const response = &server_request.response;
+        if (request.method == .Unknown) return;
+        log.info("{} {} {} ({}) {}", .{
+            response.status.code,
+            @tagName(request.method),
+            request.path,
+            request.client,
+            response.body.items.len});
+    }
+};
+
