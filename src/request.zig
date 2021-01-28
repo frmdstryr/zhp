@@ -554,7 +554,7 @@ pub const Request = struct {
 //                         content.data.file[0..n]});
                 },
                 .Buffer => {
-                    try std.fmt.format(out_stream, "  .body=\"{}\",\n", .{
+                    try std.fmt.format(out_stream, "  .body=\"{s}\",\n", .{
                         content.data.buffer[0..n]});
                 }
             }

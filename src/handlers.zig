@@ -51,7 +51,7 @@ pub const ServerErrorHandler = struct {
                 if (part.is("stacktrace")) {
                     // Dump stack trace
                     if (self.server_request.err) |err| {
-                        try response.stream.print("error: {}\n", .{err});
+                        try response.stream.print("error: {s}\n", .{err});
                     }
                     if (@errorReturnTrace()) |trace| {
                         try std.debug.writeStackTrace(

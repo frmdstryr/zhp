@@ -92,14 +92,14 @@ pub const Form = struct {
         var buf: [74]u8 = undefined;
 
         // Check final boundary
-        const final_boundary = try std.fmt.bufPrint(&buf, "--{}--", .{bounds});
+        const final_boundary = try std.fmt.bufPrint(&buf, "--{s}--", .{bounds});
         const final_boundary_index = mem.lastIndexOf(u8, data, final_boundary);
         if (final_boundary_index == null) {
             log.warn("Invalid multipart/form-data: no final boundary", .{});
             return error.MultipartFinalBoundaryMissing;
         }
 
-        const separator = try std.fmt.bufPrint(&buf, "--{}\r\n", .{bounds});
+        const separator = try std.fmt.bufPrint(&buf, "--{s}\r\n", .{bounds});
 
         var fields = simd.split(data[0..final_boundary_index.?], separator);
 
@@ -116,7 +116,7 @@ pub const Form = struct {
             const header_sep = "\r\n\r\n";
             const eoh = mem.lastIndexOf(u8, part, header_sep);
             if (eoh == null) {
-                log.warn("multipart/form-data missing headers: {}", .{part});
+                log.warn("multipart/form-data missing headers: {s}", .{part});
                 continue;
             }
 
