@@ -4,6 +4,8 @@
 
 A (work in progress) Http server written in [Zig](https://ziglang.org/).
 
+If you have suggestions on improving the design please feel free to comment!
+
 ### Features
 
 - A zero-copy parser and aims to compete with these [parser_benchmarks](https://github.com/rust-bakery/parser_benchmarks/tree/master/http)
@@ -35,6 +37,8 @@ To make and deploy your own app see:
 
 
 ### Example
+
+See the `example` folder for a more detailed example.
 
 ```zig
 const std = @import("std");

@@ -14,13 +14,14 @@ pub fn main() anyerror!void {
 
     // Ignore sigpipe
     var act = os.Sigaction{
-         .sigaction = os.SIG_IGN,
-         .mask = os.empty_sigset,
-         .flags = 0,
-     };
-     os.sigaction(os.SIGPIPE, &act, null);
+        .handler = .{.sigaction = os.SIG_IGN },
+        .mask = os.empty_sigset,
+        .flags = 0,
+    };
+    os.sigaction(os.SIGPIPE, &act, null);
 
-    var server = net.StreamServer.init(.{});
+    var server = net.StreamServer.init(.{.reuse_address=true});
+    defer server.close();
     defer server.deinit();
 
     try server.listen(req_listen_addr);
@@ -37,14 +38,15 @@ pub fn main() anyerror!void {
 }
 
 pub fn serve(conn: net.StreamServer.Connection) !void {
+    defer conn.stream.close();
     handleConn(conn) catch |err| {
         std.debug.warn("Disconnected {}: {}\n", .{conn, err});
     };
 }
 
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
-    var reader = conn.file.reader();
-    var writer = conn.file.writer();
+    var reader = conn.stream.reader();
+    var writer = conn.stream.writer();
     var buf: [64*1024]u8 = undefined;
     while (true) {
         const n = try reader.read(&buf);

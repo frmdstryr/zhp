@@ -4,3 +4,6 @@ zig-cache/
 *.kate-swp
 
 callgrind.*
+
+__pycache__/
+

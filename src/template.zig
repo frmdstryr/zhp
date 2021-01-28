@@ -39,7 +39,16 @@ const Section = struct {
                         @field(context, self.content);
 
                 // TODO: Escape
-                try stream.print("{}", .{v});
+                const T = @TypeOf(v);
+                switch (@typeInfo(T)) {
+                    .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                        // {s} says unknown format string??
+                        try stream.print("{}", .{v});
+                    },
+                    else => {
+                        try stream.print("{s}", .{v});
+                    }
+                }
             },
             .Template => {
                 // TODO: Support sub contexts...
@@ -161,9 +170,9 @@ pub fn Template(comptime Context: type, comptime template: []const u8) type {
         const Self = @This();
 
         pub fn dump() void {
-            std.debug.warn("Template (length = {})\n", .{template.len});
+            std.debug.warn("Template (length = {d})\n", .{template.len});
             inline for(sections) |s| {
-                std.debug.warn("{} (\"{}\")\n", .{s, template[s.start..s.end]});
+                std.debug.warn("{s} (\"{s}\")\n", .{s, template[s.start..s.end]});
             }
         }
 

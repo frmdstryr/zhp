@@ -533,14 +533,14 @@ pub const Request = struct {
         out_stream: anytype,
     ) !void {
         try std.fmt.format(out_stream, "Request{{\n", .{});
-        try std.fmt.format(out_stream, "  .client=\"{}\",\n", .{self.client});
-        try std.fmt.format(out_stream, "  .method={},\n", .{self.method});
-        try std.fmt.format(out_stream, "  .version={},\n", .{self.version});
-        try std.fmt.format(out_stream, "  .scheme={},\n", .{self.scheme});
-        try std.fmt.format(out_stream, "  .host=\"{}\",\n", .{self.host});
-        try std.fmt.format(out_stream, "  .path=\"{}\",\n", .{self.path});
-        try std.fmt.format(out_stream, "  .query=\"{}\",\n", .{self.query});
-        try std.fmt.format(out_stream, "  .headers={},\n", .{self.headers});
+        try std.fmt.format(out_stream, "  .client=\"{s}\",\n", .{self.client});
+        try std.fmt.format(out_stream, "  .method={s},\n", .{self.method});
+        try std.fmt.format(out_stream, "  .version={s},\n", .{self.version});
+        try std.fmt.format(out_stream, "  .scheme={s},\n", .{self.scheme});
+        try std.fmt.format(out_stream, "  .host=\"{s}\",\n", .{self.host});
+        try std.fmt.format(out_stream, "  .path=\"{s}\",\n", .{self.path});
+        try std.fmt.format(out_stream, "  .query=\"{s}\",\n", .{self.query});
+        try std.fmt.format(out_stream, "  .headers={s},\n", .{self.headers});
         if (self.content) |content| {
             const n = std.math.min(self.content_length, 1024);
             switch (content.type) {

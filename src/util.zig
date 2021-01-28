@@ -84,12 +84,12 @@ pub const IOStream = struct {
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, stream: Stream,
+    pub fn initCapacity(allocator: *Allocator, stream: ?Stream,
                         in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_stream = s,
-            .out_stream = s,
+            .in_stream = if (stream) |s| s else invalid_stream,
+            .out_stream = if (stream) |s| s else invalid_stream,
             .in_buffer = try allocator.alloc(u8, in_capacity),
             .out_buffer = try allocator.alloc(u8, out_capacity),
             .owns_in_buffer = in_capacity == 0,
@@ -117,8 +117,8 @@ pub const IOStream = struct {
     pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
             .allocator = allocator,
-            .in_stream = try std.fs.openStreamAbsolute("/dev/null", .{.read=true}),
-            .out_stream = try std.fs.openStreamAbsolute("/dev/null", .{.write=true}),
+            .in_stream = invalid_stream,
+            .out_stream = invalid_stream,
             .in_buffer = try mem.dupe(allocator, u8, in_buffer),
             .owns_in_buffer = in_buffer.len > 0,
             ._in_start_index = 0,
@@ -147,8 +147,8 @@ pub const IOStream = struct {
     // Reset the the initial state without reallocating
     pub fn reinit(self: *Self, stream: Stream) void {
         self.close(); // Close old files
-        self.in_stream = file;
-        self.out_stream = file;
+        self.in_stream = stream;
+        self.out_stream = stream;
         self._in_start_index = self.in_buffer.len;
         self._in_end_index = self.in_buffer.len;
         self._in_count = 0;
@@ -461,7 +461,7 @@ pub const IOStream = struct {
     }
 
     pub fn flush(self: *Self) !void {
-        try self.out_stream.writeAll(self.out_buffer[0..self._out_index]);
+        try self.out_stream.writer().writeAll(self.out_buffer[0..self._out_index]);
         self._out_index = 0;
     }
 
@@ -516,7 +516,7 @@ pub const IOStream = struct {
 };
 
 // The event based lock doesn't work without evented io
-pub const Lock = if (std.io.is_async) std.event.Lock else std.Mutex;
+pub const Lock = if (std.io.is_async) std.event.Lock else std.Thread.Mutex;
 
 pub fn ObjectPool(comptime T: type) type {
     return struct {

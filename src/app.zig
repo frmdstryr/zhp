@@ -207,7 +207,7 @@ pub const ServerConnection = struct {
     pub fn startRequestLoop(self: *ServerConnection,
                             conn: net.StreamServer.Connection) !void {
         self.requestLoop(conn) catch |err| {
-            log.err("unexpected error: {}", .{@errorName(err)});
+            log.err("unexpected error: {s}", .{@errorName(err)});
         };
         //log.debug("Closed {}", .{conn});
     }
@@ -304,7 +304,10 @@ pub const ServerConnection = struct {
                 try app.error_handler(server_request);
 
                 switch (err) {
-                    error.BrokenPipe, error.EndOfStream, error.ConnectionResetByPeer => {
+                    error.BrokenPipe,
+                    error.EndOfStream,
+                    error.ConnectionResetByPeer,
+                    error.NotOpenForReading => {
                         self.io.closed = true; // Make sure no response is sent
 
                         // Only log if it was a partial request
@@ -617,7 +620,7 @@ pub const Application = struct {
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
-        std.debug.warn("Listing on {}:{}\n", .{address, port});
+        std.debug.warn("Listing on {s}:{d}\n", .{address, port});
     }
 
     // Start serving requests For each incoming connection.
@@ -760,7 +763,7 @@ pub const Application = struct {
             server_conn.io.close();
             n += 1;
         }
-        log.info(" Closed {} connections.", .{n});
+        log.info(" Closed {d} connections.", .{n});
     }
 
     pub fn deinit(self: *Application) void {

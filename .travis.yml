@@ -12,10 +12,10 @@ before_install:
 
 script:
     # Test individual files
-    - zig test -OReleaseSafe lib/zhp/app.zig
+    - zig test -OReleaseSafe src/app.zig
 
     # Run parser test
-    - zig run --pkg-begin zhp lib/zhp/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
+    - zig run --pkg-begin zhp src/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
 
     # Make sure this repo builds
     - zig build -Drelease-safe=true install

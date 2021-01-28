@@ -94,7 +94,7 @@ test "response" {
     _ = try response.stream.write("Hello world!\n");
     std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.items);
 
-    _ = try response.stream.print("{}\n", .{"Testing!"});
+    _ = try response.stream.print("{s}\n", .{"Testing!"});
     std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.items);
     try response.headers.put("Content-Type", "Keep-Alive");
 }

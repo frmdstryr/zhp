@@ -1,5 +1,5 @@
 // Run with
-// zig run --pkg-begin zhp lib/zhp/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
+// zig run --pkg-begin zhp src/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
 //
 const std = @import("std");
 const net = std.net;

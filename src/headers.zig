@@ -55,7 +55,7 @@ pub const Headers = struct {
     ) !void {
         try std.fmt.format(out_stream, "Headers{{", .{});
         for (self.headers.items) |header| {
-            try std.fmt.format(out_stream, "\"{}\": \"{}\", ", .{header.key, header.value});
+            try std.fmt.format(out_stream, "\"{s}\": \"{s}\", ", .{header.key, header.value});
         }
         try std.fmt.format(out_stream, "}}", .{});
     }
@@ -258,7 +258,7 @@ test "headers-put" {
     try headers.put("Cookie", "Nom;nom;nom");
     testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
     try headers.put("COOKie", "ABC"); // Squash even if different
-    std.debug.warn("Cookie is: {}", .{try headers.get("Cookie")});
+    std.debug.warn("Cookie is: {s}", .{try headers.get("Cookie")});
     testing.expectEqualSlices(u8, try headers.get("Cookie"), "ABC");
 }
 

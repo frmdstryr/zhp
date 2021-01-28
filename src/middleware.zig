@@ -12,15 +12,11 @@ const ServerRequest = web.ServerRequest;
 
 
 pub const LoggingMiddleware = struct {
-    // If you want storage use it statically
-
-    pub fn processRequest(app: *Application, server_request: *ServerRequest) !void {}
-
     pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
         const request = &server_request.request;
         const response = &server_request.response;
         if (request.method == .Unknown) return;
-        log.info("{} {} {} ({}) {}", .{
+        log.info("{d} {s} {s} ({s}) {d}", .{
             response.status.code,
             @tagName(request.method),
             request.path,
@@ -38,15 +34,7 @@ pub const SessionMiddleware = struct {
     }
 
     pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
-        const request = &server_request.request;
-        const response = &server_request.response;
-        if (request.method == .Unknown) return;
-        log.info("{} {} {} ({}) {}", .{
-            response.status.code,
-            @tagName(request.method),
-            request.path,
-            request.client,
-            response.body.items.len});
+
     }
 };
 
