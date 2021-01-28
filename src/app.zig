@@ -264,16 +264,16 @@ pub const ServerConnection = struct {
                 else => {
                     server_request.err = err;
 
-                    if (params.debug) {
-                        if (@errorReturnTrace()) |trace| {
-                            try std.debug.writeStackTrace(
-                                trace.*,
-                                &std.io.getStdErr().writer(),
-                                response.allocator,
-                                try std.debug.getSelfDebugInfo(),
-                                std.debug.detectTTYConfig());
-                        }
-                    }
+//                     if (params.debug) {
+//                         if (@errorReturnTrace()) |trace| {
+//                             try std.debug.writeStackTrace(
+//                                 trace.*,
+//                                 &std.io.getStdErr().writer(),
+//                                 response.allocator,
+//                                 try std.debug.getSelfDebugInfo(),
+//                                 std.debug.detectTTYConfig());
+//                         }
+//                     }
                 }
             };
 

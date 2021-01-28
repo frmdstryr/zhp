@@ -12,7 +12,7 @@ const Response = web.Response;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub const io_mode = .evented;
-//pub const log_level = .info;
+pub const log_level = .debug;
 
 
 /// This handler demonstrates how to send a template resrponse using

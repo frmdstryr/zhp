@@ -416,8 +416,7 @@ pub const Request = struct {
     pub fn parseContentLength(self: *Request, max_size: usize) !void {
         const headers = &self.headers;
         // Read content length
-        const header: ?[]const u8 = headers.get("Content-Length") catch null;
-        if (header) |content_length| {
+        if (headers.getOptional("Content-Length")) |content_length| {
             if (headers.contains("Transfer-Encoding")) {
                 // Response cannot contain both Content-Length and
                 // Transfer-Encoding headers.
