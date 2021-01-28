@@ -246,6 +246,7 @@ pub const ServerConnection = struct {
             .max_request_line_size = params.max_request_line_size,
             .max_header_size = params.max_request_headers_size,
             .max_content_length = params.max_content_length,
+            .dump_buffer = params.dump_request_buffer,
         };
 
         request.client = conn.address;
@@ -258,19 +259,22 @@ pub const ServerConnection = struct {
             var processed_response = false;
 
             // Parse the request line and headers
-            request.parse(&self.io, options) catch |err| {
-                server_request.err = err;
+            request.parse(&self.io, options) catch |err| switch (err) {
+                error.EndOfStream => return,
+                else => {
+                    server_request.err = err;
 
-//                 if (params.debug) {
-//                     if (@errorReturnTrace()) |trace| {
-//                         try std.debug.writeStackTrace(
-//                             trace.*,
-//                             &std.io.getStdErr().writer(),
-//                             response.allocator,
-//                             try std.debug.getSelfDebugInfo(),
-//                             std.debug.detectTTYConfig());
-//                     }
-//                 }
+                    if (params.debug) {
+                        if (@errorReturnTrace()) |trace| {
+                            try std.debug.writeStackTrace(
+                                trace.*,
+                                &std.io.getStdErr().writer(),
+                                response.allocator,
+                                try std.debug.getSelfDebugInfo(),
+                                std.debug.detectTTYConfig());
+                        }
+                    }
+                }
             };
 
             // Get the function used to build the handler for the request
@@ -358,14 +362,14 @@ pub const ServerConnection = struct {
         const content_length = response.body.items.len;
 
         // Write status line
-        try stream.print("HTTP/1.1 {} {}\r\n", .{
+        try stream.print("HTTP/1.1 {d} {s}\r\n", .{
             response.status.code,
             response.status.phrase
         });
 
         // Write headers
         for (response.headers.headers.items) |header| {
-            try stream.print("{}: {}\r\n", .{header.key, header.value});
+            try stream.print("{s}: {s}\r\n", .{header.key, header.value});
         }
 
         // Set default content type
@@ -375,7 +379,7 @@ pub const ServerConnection = struct {
 
         // Send content length if missing otherwise the client hangs reading
         if (!response.send_stream and !response.headers.contains("Content-Length")) {
-            try stream.print("Content-Length: {}\r\n", .{content_length});
+            try stream.print("Content-Length: {d}\r\n", .{content_length});
         }
 
         // End of headers
@@ -548,6 +552,9 @@ pub const Application = struct {
         // If request line is longer than this return a request uri too long error
         max_request_line_size: u32 = 4096,
 
+        // Log request buffer
+        dump_request_buffer: bool = false,
+
         // If the content length is over the request buffer size
         // it will spool to a temp file on disk up to this size
         max_content_length: u64 = 50*1024*1024, // 50 MB
@@ -620,7 +627,7 @@ pub const Application = struct {
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
-        std.debug.warn("Listing on {s}:{d}\n", .{address, port});
+        log.info("Listing on {s}:{d}\n", .{address, port});
     }
 
     // Start serving requests For each incoming connection.

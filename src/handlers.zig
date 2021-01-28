@@ -51,7 +51,7 @@ pub const ServerErrorHandler = struct {
                 if (part.is("stacktrace")) {
                     // Dump stack trace
                     if (self.server_request.err) |err| {
-                        try response.stream.print("error: {}\n", .{@errorName(err)});
+                        try response.stream.print("error: {}\n", .{err});
                     }
                     if (@errorReturnTrace()) |trace| {
                         try std.debug.writeStackTrace(
@@ -384,7 +384,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
 
                 const host = request.headers.getDefault("Host", "");
                 if (origin.len == 0 or host.len == 0 or !ascii.eqlIgnoreCase(origin, host)) {
-                    log.debug("Cross origin websockets are not allowed ('{}' != '{}')", .{
+                    log.debug("Cross origin websockets are not allowed ('{s}' != '{s}')", .{
                         origin, host
                     });
                     return false;

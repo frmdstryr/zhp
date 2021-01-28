@@ -495,9 +495,12 @@ pub const IOStream = struct {
     pub fn close(self: *Self) void {
         if (self.closed) return;
         self.closed = true;
-        self.in_stream.close();
-        if (self.in_stream.handle != self.out_stream.handle) {
-            self.out_stream.close();
+        const in_stream = &self.in_stream;
+        const out_stream = &self.out_stream ;
+        //if (in_stream.handle != 0) in_stream.close();
+        //std.debug.warn("Close in={} out={}\n", .{in_stream, out_stream});
+        if (in_stream.handle != out_stream.handle and out_stream.handle != 0) {
+            //out_stream.close();
         }
     }
 

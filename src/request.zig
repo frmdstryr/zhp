@@ -78,6 +78,9 @@ pub const Request = struct {
 
         // If the content length is larger than this throw an error
         max_content_length: usize = 1000*1024*1024,
+
+        // Dump conents of the request buffer
+        dump_buffer: bool = false,
     };
 
     pub const Method = enum {
@@ -198,13 +201,14 @@ pub const Request = struct {
 
         var start = stream.readCount();
 
-//         std.log.warn(
-//            \\
-//            \\========== Buffer at {} ==========
-//            \\{}
-//            \\==============================
-//            , .{start, stream.readBuffered()});
-//
+        if (options.dump_buffer) {
+            std.log.debug(
+            \\
+            \\========== Buffer at {} ==========
+            \\{s}
+            \\==============================
+            , .{start, stream.readBuffered()});
+        }
 
         while (true) {
             self.parseNoSwap(stream, options) catch |err| switch (err) {
