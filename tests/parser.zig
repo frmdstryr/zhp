@@ -26,17 +26,18 @@ pub fn main() !void {
     defer std.debug.assert(!gpa.deinit());
     var timer = try std.time.Timer.start();
     for (tests) |t| {
-        std.debug.warn("Parsing {}...", .{t.path});
+        std.debug.warn("Parsing {s}...", .{t.path});
         var file = try fs.cwd().openFile(t.path, .{});
         timer.reset();
-        const cnt = try parseRequests(file);
+        var socket = net.Stream{.handle=file.handle}; // HACK...
+        const cnt = try parseRequests(socket);
         std.debug.warn("Done! ({} ns/req)\n", .{timer.read() / t.count});
         std.testing.expectEqual(t.count, cnt);
     }
 }
 
-pub fn parseRequests(file: fs.File) !usize {
-    var stream = try web.IOStream.initCapacity(allocator, file, 0, 4096);
+pub fn parseRequests(socket: net.Stream) !usize {
+    var stream = try web.IOStream.initCapacity(allocator, socket, 0, 4096);
     defer stream.deinit();
     var request = try web.Request.initCapacity(allocator, 1024*10, 32, 32);
     defer request.deinit();
@@ -49,9 +50,9 @@ pub fn parseRequests(file: fs.File) !usize {
             error.EndOfStream, error.BrokenPipe,
             error.ConnectionResetByPeer => break,
             else => {
-                std.debug.warn("Stream {}:\n'{}'\n", .{
+                std.debug.warn("Stream {}:\n'{s}'\n", .{
                     end, stream.in_buffer[0..end]});
-                std.debug.warn("Error parsing:\n'{}'\n", .{
+                std.debug.warn("Error parsing:\n'{s}'\n", .{
                     request.buffer.items[0..stream.readCount()]});
                 return err;
             },
