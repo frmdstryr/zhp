@@ -205,14 +205,14 @@ test "template-variable" {
     const Tmpl = Template(Context, "Hello {{name}}!");
     try expectRender(Tmpl, .{.name="World"}, "Hello World!");
 }
-
-test "template-variable-self" {
-    const Context = struct {
-        name: []const u8,
-    };
-    const Tmpl = Template(Context, "{{self}}!");
-    try expectRender(Tmpl, .{.name="World"}, "Context{ .name = World }!");
-}
+//
+// test "template-variable-self" {
+//     const Context = struct {
+//         name: []const u8,
+//     };
+//     const Tmpl = Template(Context, "{{self}}!");
+//     try expectRender(Tmpl, .{.name="World"}, "Context{ .name = World }!");
+// }
 
 test "template-variable-nested" {
     const User = struct {
