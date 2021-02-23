@@ -71,7 +71,7 @@ pub fn main() anyerror!void {
     std.log.warn("copy diff: {}", .{@intToFloat(f32, t5)/@intToFloat(f32, t6)});
 }
 
-pub inline fn copy(comptime T: type, dest: []T, source: []const T) void {
+pub fn copy(comptime T: type, dest: []T, source: []const T) callconv(.Inline) void {
     const n = 32; // TODO: Adjust based on bitSizeOf T
     const V = @Vector(n, T);
     if (source.len < n) return std.mem.copy(T, dest, source);
@@ -85,7 +85,7 @@ pub inline fn copy(comptime T: type, dest: []T, source: []const T) void {
     }
 }
 
-pub inline fn eql(comptime T: type, a: []const T, b: []const T) bool {
+pub fn eql(comptime T: type, a: []const T, b: []const T) callconv(.Inline) bool {
     const n = 32;
     const V8x32 = @Vector(n, T);
     if (a.len != b.len) return false;

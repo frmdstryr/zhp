@@ -171,7 +171,7 @@ pub fn Template(comptime Context: type, comptime template: []const u8) type {
 
         pub fn dump() void {
             std.debug.warn("Template (length = {d})\n", .{template.len});
-            inline for(sections) |s| {
+            inline for (sections) |s| {
                 std.debug.warn("{s} (\"{s}\")\n", .{s, template[s.start..s.end]});
             }
         }

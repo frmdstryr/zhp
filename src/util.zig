@@ -14,7 +14,7 @@ const assert = std.debug.assert;
 pub const Bytes = std.ArrayList(u8);
 
 
-pub inline fn isCtrlChar(ch: u8) bool {
+pub fn isCtrlChar(ch: u8) callconv(.Inline) bool {
     return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
 }
 
@@ -48,7 +48,7 @@ const token_map = [_]u1{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-pub inline fn isTokenChar(ch: u8) bool {
+pub fn isTokenChar(ch: u8) callconv(.Inline) bool {
     return token_map[ch] == 1;
 }
 
@@ -191,7 +191,8 @@ pub const IOStream = struct {
         self.unbuffered = unbuffered;
     }
 
-    pub inline fn shiftAndFillBuffer(self: *Self, start: usize) !usize {
+    // TODO: Inline is broken
+    pub fn shiftAndFillBuffer(self: *Self, start: usize) !usize {
         self.unbuffered = true;
         defer self.unbuffered = false;
 
@@ -220,30 +221,30 @@ pub const IOStream = struct {
     }
 
     // Return the amount of bytes waiting in the input buffer
-    pub inline fn amountBuffered(self: *Self) usize {
+    pub fn amountBuffered(self: *Self) callconv(.Inline) usize {
         return self._in_end_index-self._in_start_index;
     }
 
-    pub inline fn isEmpty(self: *Self) bool {
+    pub fn isEmpty(self: *Self) callconv(.Inline) bool {
         return self._in_end_index == self._in_start_index;
     }
 
-    pub inline fn readCount(self: *Self) usize {
+    pub fn readCount(self: *Self) callconv(.Inline) usize {
         //return self._in_count + self._in_start_index;
         return self._in_start_index;
     }
 
-    pub inline fn consumeBuffered(self: *Self, size: usize) usize {
+    pub fn consumeBuffered(self: *Self, size: usize) callconv(.Inline) usize {
         const n = math.min(size, self.amountBuffered());
         self._in_start_index += n;
         return n;
     }
 
-    pub inline fn skipBytes(self: *Self, n: usize) void {
+    pub fn skipBytes(self: *Self, n: usize) callconv(.Inline) void {
         self._in_start_index += n;
     }
 
-    pub inline fn readBuffered(self: *Self) []u8 {
+    pub fn readBuffered(self: *Self) callconv(.Inline) []u8 {
         return self.in_buffer[self._in_start_index..self._in_end_index];
     }
 
@@ -268,7 +269,7 @@ pub const IOStream = struct {
         return @bitCast(T, r);
     }
 
-    fn readFn(self: *Self, dest: []u8) !usize {
+    pub fn readFn(self: *Self, dest: []u8) !usize {
         //const self = @fieldParentPtr(BufferedReader, "stream", in_stream);
         if (self.unbuffered) return try self.in_stream.read(dest);
 
@@ -324,7 +325,8 @@ pub const IOStream = struct {
     }
 
 
-    pub inline fn fillBuffer(self: *Self) !void {
+    // TODO: Inline is broken
+    pub fn fillBuffer(self: *Self) !void {
         const n = try self.readFn(self.in_buffer);
         if (n == 0) return error.EndOfStream;
         self._in_start_index = 0;
@@ -346,20 +348,20 @@ pub const IOStream = struct {
         return c;
     }
 
-    pub inline fn readByteSafe(self: *Self) !u8 {
+    pub fn readByteSafe(self: *Self) callconv(.Inline) !u8 {
         if (self._in_end_index == self._in_start_index) {
             return error.EndOfBuffer;
         }
         return self.readByteUnsafe();
     }
 
-    pub inline fn readByteUnsafe(self: *Self) u8 {
+    pub fn readByteUnsafe(self: *Self) callconv(.Inline) u8 {
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
         return c;
     }
 
-    pub inline fn lastByte(self: *Self) u8 {
+    pub fn lastByte(self: *Self) callconv(.Inline) u8 {
         return self.in_buffer[self._in_start_index];
     }
 
@@ -373,7 +375,7 @@ pub const IOStream = struct {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {
-            inline for("01234567") |_| {
+            inline for ("01234567") |_| {
                 if (expr(ch)) {
                     found = true;
                     break;
@@ -404,7 +406,7 @@ pub const IOStream = struct {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {
-            inline for("01234567") |_| {
+            inline for ("01234567") |_| {
                 if (try expr(ch)) {
                     found = true;
                     break;

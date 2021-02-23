@@ -378,7 +378,8 @@ pub const routes = [_]web.Route{
 
 
 pub const middleware = [_]web.Middleware{
-    //web.Middleware.create(web.middleware.LoggingMiddleware),
+    web.Middleware.create(web.middleware.LoggingMiddleware),
+    //web.Middleware.create(web.middleware.SessionMiddleware),
 };
 
 pub fn main() !void {

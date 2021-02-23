@@ -206,10 +206,11 @@ pub const ServerConnection = struct {
     // Handles a connection
     pub fn startRequestLoop(self: *ServerConnection,
                             conn: net.StreamServer.Connection) !void {
+        defer self.release();
         self.requestLoop(conn) catch |err| {
             log.err("unexpected error: {s}", .{@errorName(err)});
         };
-        //log.debug("Closed {}", .{conn});
+        // log.debug("Closed {}", .{conn});
     }
 
     fn requestLoop(self: *ServerConnection, conn: net.StreamServer.Connection) !void {
@@ -219,7 +220,6 @@ pub const ServerConnection = struct {
         const stream = &self.io.writer();
         self.io.reinit(conn.stream);
         defer self.io.close();
-        defer self.release();
 
         // Grab a request
         // at some point this should be moved into the loop to handle
@@ -260,7 +260,9 @@ pub const ServerConnection = struct {
 
             // Parse the request line and headers
             request.parse(&self.io, options) catch |err| switch (err) {
-                error.EndOfStream => return,
+                error.ConnectionResetByPeer,
+                error.BrokenPipe,
+                error.EndOfStream => return, // Ignore
                 else => {
                     server_request.err = err;
 
@@ -284,7 +286,7 @@ pub const ServerConnection = struct {
 
             // Let middleware cleanup
             errdefer if (!processed_response) app.processResponse(server_request) catch |err| {
-                log.err("unexpected processing response: {}", .{@errorName(err)});
+                log.err("unexpected processing response: {}", .{err});
             };
 
             if (server_request.err == null and !intercepted) {
@@ -511,13 +513,17 @@ const default_route = [_]Route{
 
 
 pub const Middleware = struct {
+    init: ?fn(app: *Application) anyerror!void = null,
     processRequest: ?Handler = null,
     processResponse: ?Handler = null,
+    deinit: ?fn(app: *Application) void = null,
 
     pub fn create(comptime T: type) Middleware {
         return Middleware{
+            .init = if (@hasDecl(T, "init")) T.init else null,
             .processRequest = if (@hasDecl(T, "processRequest")) T.processRequest else null,
             .processResponse = if (@hasDecl(T, "processResponse")) T.processResponse else null,
+            .deinit = if (@hasDecl(T, "deinit")) T.deinit else null,
         };
     }
 
@@ -572,11 +578,14 @@ pub const Application = struct {
 
 
         // List of trusted downstream (ie proxy) servers
-        trusted_downstream: ?[][]const u8 = null,
+        trust_x_headers: bool = true,
         server_options: net.StreamServer.Options = net.StreamServer.Options{
             .kernel_backlog = 1024,
             .reuse_address = true,
         },
+
+        // Salt
+        secret_key: []const u8 = "DoNotUSEthis_in[production]",
 
         // Debugging
         debug: bool = false,
@@ -647,6 +656,13 @@ pub const Application = struct {
         Application.instance = self;
         self.running = true;
 
+        // Init middleware
+        inline for (middleware) |m| {
+            if (m.init) |f| {
+                try f(self);
+            }
+        }
+
         var background = async self.backgroundLoop();
 
         // Make sure the background task stops if an error occurs
@@ -669,7 +685,7 @@ pub const Application = struct {
             lock.release();
 
             const conn = try self.server.accept();
-            //log.debug("Accepted {}", .{conn});
+            //log.debug("Accepted {s}", .{conn});
 
             // Start processing requests
             if (comptime std.io.is_async) {
@@ -705,7 +721,7 @@ pub const Application = struct {
         const path = server_request.request.path;
         inline for (routes) |*route| {
             if (try regex.match(route.pattern, .{.encoding=.ascii}, path)) |*match| {
-                //std.debug.warn("Route: name={} path={}\n", .{route.name, request.path});
+                //std.debug.warn("Route: name={s} path={s}\n", .{route.name, request.path});
                 if (match.captures.len > 0) {
                     server_request.request.args = match.captures[0..];
                 }
@@ -775,6 +791,13 @@ pub const Application = struct {
 
     pub fn deinit(self: *Application) void {
         log.info(" Shutting down...", .{});
+        // Init middleware
+        inline for (middleware) |m| {
+            if (m.deinit) |f| {
+                f(self);
+            }
+        }
+
         self.closeAllConnections();
         self.server.deinit();
         self.connection_pool.deinit();
