@@ -137,6 +137,8 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
             // Get file info
             const stat = try file.stat();
+            // XXX This line is required otherwise `Segmentation fault at address 0x0` raises at next line.
+            const st = try std.os.fstat(file.handle);
             var modified = Datetime.fromModifiedTime(stat.mtime);
 
             // If the file was not modified, return 304
