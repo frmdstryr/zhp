@@ -674,6 +674,6 @@ pub const Zulu = create("Zulu", 0);
 
 test "timezone-get" {
     const testing = std.testing;
-    //testing.expect(get("America/New_York").? == America.New_York);
-    testing.expect(America.New_York.offset == -300);
+    //try testing.expect(get("America/New_York").? == America.New_York);
+    try testing.expect(America.New_York.offset == -300);
 }

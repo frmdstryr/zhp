@@ -65,27 +65,25 @@ pub const Month = enum {
 };
 
 test "month-parse-abbr" {
-    testing.expectEqual(try Month.parseAbbr("Jan"), .January);
-    testing.expectEqual(try Month.parseAbbr("Oct"), .October);
-    testing.expectEqual(try Month.parseAbbr("sep"), .September);
-    testing.expectError(error.InvalidFormat, Month.parseAbbr("cra"));
+    try testing.expectEqual(try Month.parseAbbr("Jan"), .January);
+    try testing.expectEqual(try Month.parseAbbr("Oct"), .October);
+    try testing.expectEqual(try Month.parseAbbr("sep"), .September);
+    try testing.expectError(error.InvalidFormat, Month.parseAbbr("cra"));
 }
 
 test "month-parse" {
-    testing.expectEqual(try Month.parseName("January"), .January);
-    testing.expectEqual(try Month.parseName("OCTOBER"), .October);
-    testing.expectEqual(try Month.parseName("july"), .July);
-    testing.expectError(error.InvalidFormat, Month.parseName("NoShaveNov"));
+    try testing.expectEqual(try Month.parseName("January"), .January);
+    try testing.expectEqual(try Month.parseName("OCTOBER"), .October);
+    try testing.expectEqual(try Month.parseName("july"), .July);
+    try testing.expectError(error.InvalidFormat, Month.parseName("NoShaveNov"));
 }
 
 pub const MIN_YEAR: u16 = 1;
 pub const MAX_YEAR: u16 = 9999;
 pub const MAX_ORDINAL: u32 = 3652059;
 
-const DAYS_IN_MONTH = [12]u8{
-    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-const DAYS_BEFORE_MONTH = [12]u16{
-    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+const DAYS_IN_MONTH = [12]u8{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+const DAYS_BEFORE_MONTH = [12]u16{ 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
 
 pub fn isLeapYear(year: u32) bool {
     return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0);
@@ -96,52 +94,48 @@ pub fn isLeapDay(year: u32, month: u32, day: u32) bool {
 }
 
 test "leapyear" {
-    testing.expect(isLeapYear(2019) == false);
-    testing.expect(isLeapYear(2018) == false);
-    testing.expect(isLeapYear(2017) == false);
-    testing.expect(isLeapYear(2016) == true);
-    testing.expect(isLeapYear(2000) == true);
-    testing.expect(isLeapYear(1900) == false);
+    try testing.expect(isLeapYear(2019) == false);
+    try testing.expect(isLeapYear(2018) == false);
+    try testing.expect(isLeapYear(2017) == false);
+    try testing.expect(isLeapYear(2016) == true);
+    try testing.expect(isLeapYear(2000) == true);
+    try testing.expect(isLeapYear(1900) == false);
 }
 
 // Number of days before Jan 1st of year
 pub fn daysBeforeYear(year: u32) u32 {
     var y: u32 = year - 1;
-    return y*365 + @divFloor(y, 4) - @divFloor(y, 100) + @divFloor(y, 400);
+    return y * 365 + @divFloor(y, 4) - @divFloor(y, 100) + @divFloor(y, 400);
 }
 
 // Days before 1 Jan 1970
 const EPOCH = daysBeforeYear(1970) + 1;
 
-
 test "daysBeforeYear" {
-    testing.expect(daysBeforeYear(1996) == 728658);
-    testing.expect(daysBeforeYear(2019) == 737059);
+    try testing.expect(daysBeforeYear(1996) == 728658);
+    try testing.expect(daysBeforeYear(2019) == 737059);
 }
 
 // Number of days in that month for the year
 pub fn daysInMonth(year: u32, month: u32) u8 {
     assert(1 <= month and month <= 12);
     if (month == 2 and isLeapYear(year)) return 29;
-    return DAYS_IN_MONTH[month-1];
+    return DAYS_IN_MONTH[month - 1];
 }
-
 
 test "daysInMonth" {
-    testing.expect(daysInMonth(2019, 1) == 31);
-    testing.expect(daysInMonth(2019, 2) == 28);
-    testing.expect(daysInMonth(2016, 2) == 29);
+    try testing.expect(daysInMonth(2019, 1) == 31);
+    try testing.expect(daysInMonth(2019, 2) == 28);
+    try testing.expect(daysInMonth(2016, 2) == 29);
 }
-
 
 // Number of days in year preceding the first day of month
 pub fn daysBeforeMonth(year: u32, month: u32) u32 {
     assert(month >= 1 and month <= 12);
-    var d = DAYS_BEFORE_MONTH[month-1];
+    var d = DAYS_BEFORE_MONTH[month - 1];
     if (month > 2 and isLeapYear(year)) d += 1;
     return d;
 }
-
 
 // Return number of days since 01-Jan-0001
 fn ymd2ord(year: u16, month: u8, day: u8) u32 {
@@ -151,31 +145,29 @@ fn ymd2ord(year: u16, month: u8, day: u8) u32 {
 }
 
 test "ymd2ord" {
-    testing.expect(ymd2ord(1970, 1, 1) == 719163);
-    testing.expect(ymd2ord(28, 2, 29) == 9921);
-    testing.expect(ymd2ord(2019, 11, 27) == 737390);
-    testing.expect(ymd2ord(2019, 11, 28) == 737391);
+    try testing.expect(ymd2ord(1970, 1, 1) == 719163);
+    try testing.expect(ymd2ord(28, 2, 29) == 9921);
+    try testing.expect(ymd2ord(2019, 11, 27) == 737390);
+    try testing.expect(ymd2ord(2019, 11, 28) == 737391);
 }
-
 
 test "days-before-year" {
     const DI400Y = daysBeforeYear(401); // Num of days in 400 years
     const DI100Y = daysBeforeYear(101); // Num of days in 100 years
-    const DI4Y =   daysBeforeYear(5);   // Num of days in 4   years
+    const DI4Y = daysBeforeYear(5); // Num of days in 4   years
 
     // A 4-year cycle has an extra leap day over what we'd get from pasting
     // together 4 single years.
-    std.testing.expect(DI4Y == 4*365 + 1);
+    try testing.expect(DI4Y == 4 * 365 + 1);
 
     // Similarly, a 400-year cycle has an extra leap day over what we'd get from
     // pasting together 4 100-year cycles.
-    std.testing.expect(DI400Y == 4*DI100Y + 1);
+    try testing.expect(DI400Y == 4 * DI100Y + 1);
 
     // OTOH, a 100-year cycle has one fewer leap day than we'd get from
     // pasting together 25 4-year cycles.
-    std.testing.expect(DI100Y == 25*DI4Y - 1);
+    try testing.expect(DI100Y == 25 * DI4Y - 1);
 }
-
 
 pub const Date = struct {
     year: u16,
@@ -183,7 +175,7 @@ pub const Date = struct {
     day: u8 = 1, // Day of month
 
     // Create and validate the date
-    pub fn create(year: u32, month: u32, day: u32) ! Date {
+    pub fn create(year: u32, month: u32, day: u32) !Date {
         if (year < MIN_YEAR or year > MAX_YEAR) return error.InvalidDate;
         if (month < 1 or month > 12) return error.InvalidDate;
         if (day < 1 or day > daysInMonth(year, month)) return error.InvalidDate;
@@ -224,10 +216,10 @@ pub const Date = struct {
         //      1 Jan  401         DI400Y +1     DI400Y        400-year boundary
         assert(ordinal >= 1 and ordinal <= MAX_ORDINAL);
 
-        var n = ordinal-1;
+        var n = ordinal - 1;
         comptime const DI400Y = daysBeforeYear(401); // Num of days in 400 years
         comptime const DI100Y = daysBeforeYear(101); // Num of days in 100 years
-        comptime const DI4Y =   daysBeforeYear(5);   // Num of days in 4   years
+        comptime const DI4Y = daysBeforeYear(5); // Num of days in 4   years
         const n400 = @divFloor(n, DI400Y);
         n = @mod(n, DI400Y);
         var year = n400 * 400 + 1; //  ..., -399, 1, 401, ...
@@ -253,7 +245,7 @@ pub const Date = struct {
 
         if (n1 == 4 or n100 == 4) {
             assert(n == 0);
-            return Date.create(year-1, 12, 31) catch unreachable;
+            return Date.create(year - 1, 12, 31) catch unreachable;
         }
 
         // Now the year is correct, and n is the offset from January 1.  We find
@@ -274,7 +266,7 @@ pub const Date = struct {
 
         // Now the year and month are correct, and n is the offset from the
         // start of that month:  we're done!
-        return Date.create(year, month, n+1) catch unreachable;
+        return Date.create(year, month, n + 1) catch unreachable;
     }
 
     // Return proleptic Gregorian ordinal for the year, month and day.
@@ -365,8 +357,7 @@ pub const Date = struct {
 
     // Return date in ISO format YYYY-MM-DD
     pub fn formatIso(self: Date, buf: []u8) ![]u8 {
-        return std.fmt.bufPrint(buf, "{}-{}-{}",
-            .{self.year, self.month, self.day});
+        return std.fmt.bufPrint(buf, "{}-{}-{}", .{ self.year, self.month, self.day });
     }
 
     // ------------------------------------------------------------------------
@@ -376,7 +367,7 @@ pub const Date = struct {
     // Return day of year starting with 1
     pub fn dayOfYear(self: Date) u16 {
         var d = self.toOrdinal() - daysBeforeYear(self.year);
-        assert(d >=1 and d <= 366);
+        assert(d >= 1 and d <= 366);
         return @intCast(u16, d);
     }
 
@@ -413,12 +404,12 @@ pub const Date = struct {
 
     // Return a copy of the date shifted by the given number of days
     pub fn shiftDays(self: Date, days: i32) Date {
-        return self.shift(Delta{.days=days});
+        return self.shift(Delta{ .days = days });
     }
 
     // Return a copy of the date shifted by the given number of years
     pub fn shiftYears(self: Date, years: i16) Date {
-        return self.shift(Delta{.years=years});
+        return self.shift(Delta{ .years = years });
     }
 
     pub const Delta = struct {
@@ -479,106 +470,106 @@ test "date-compare" {
     var d2 = try Date.create(2019, 7, 3);
     var d3 = try Date.create(2019, 6, 3);
     var d4 = try Date.create(2020, 7, 3);
-    testing.expect(d1.eql(d2));
-    testing.expect(d1.gt(d3));
-    testing.expect(d3.lt(d2));
-    testing.expect(d4.gt(d2));
+    try testing.expect(d1.eql(d2));
+    try testing.expect(d1.gt(d3));
+    try testing.expect(d3.lt(d2));
+    try testing.expect(d4.gt(d2));
 }
 
 test "date-from-ordinal" {
     var date = Date.fromOrdinal(9921);
-    testing.expectEqual(date.year, 28);
-    testing.expectEqual(date.month, 2);
-    testing.expectEqual(date.day, 29);
-    testing.expectEqual(date.toOrdinal(), 9921);
+    try testing.expectEqual(date.year, 28);
+    try testing.expectEqual(date.month, 2);
+    try testing.expectEqual(date.day, 29);
+    try testing.expectEqual(date.toOrdinal(), 9921);
 
     date = Date.fromOrdinal(737390);
-    testing.expectEqual(date.year, 2019);
-    testing.expectEqual(date.month, 11);
-    testing.expectEqual(date.day, 27);
-    testing.expectEqual(date.toOrdinal(), 737390);
+    try testing.expectEqual(date.year, 2019);
+    try testing.expectEqual(date.month, 11);
+    try testing.expectEqual(date.day, 27);
+    try testing.expectEqual(date.toOrdinal(), 737390);
 
     date = Date.fromOrdinal(719163);
-    testing.expectEqual(date.year, 1970);
-    testing.expectEqual(date.month, 1);
-    testing.expectEqual(date.day, 1);
-    testing.expectEqual(date.toOrdinal(), 719163);
+    try testing.expectEqual(date.year, 1970);
+    try testing.expectEqual(date.month, 1);
+    try testing.expectEqual(date.day, 1);
+    try testing.expectEqual(date.toOrdinal(), 719163);
 }
 
 test "date-from-seconds" {
     var seconds: f64 = 0;
     var date = Date.fromSeconds(seconds);
-    testing.expectEqual(date, try Date.create(1970, 1, 1));
-    testing.expectEqual(date.toSeconds(), seconds);
+    try testing.expectEqual(date, try Date.create(1970, 1, 1));
+    try testing.expectEqual(date.toSeconds(), seconds);
 
     seconds = -@as(f64, EPOCH-1)*time.s_per_day;
     date = Date.fromSeconds(seconds);
-    testing.expectEqual(date, try Date.create(1, 1, 1));
-    testing.expectEqual(date.toSeconds(), seconds);
+    try testing.expectEqual(date, try Date.create(1, 1, 1));
+    try testing.expectEqual(date.toSeconds(), seconds);
 
     seconds = @as(f64, MAX_ORDINAL-EPOCH)*time.s_per_day;
     date = Date.fromSeconds(seconds);
-    testing.expectEqual(date, try Date.create(9999, 12, 31));
-    testing.expectEqual(date.toSeconds(), seconds);
+    try testing.expectEqual(date, try Date.create(9999, 12, 31));
+    try testing.expectEqual(date.toSeconds(), seconds);
 //
 //
 //     const t = 63710928000.000;
 //     date = Date.fromSeconds(t);
-//     testing.expectEqual(date.year, 2019);
-//     testing.expectEqual(date.month, 12);
-//     testing.expectEqual(date.day, 3);
-//     testing.expectEqual(date.toSeconds(), t);
+//     try testing.expectEqual(date.year, 2019);
+//     try testing.expectEqual(date.month, 12);
+//     try testing.expectEqual(date.day, 3);
+//     try testing.expectEqual(date.toSeconds(), t);
 //
 //     Max check
 //     var max_date = try Date.create(9999, 12, 31);
 //     const tmax: f64 = @intToFloat(f64, MAX_ORDINAL-1) * time.s_per_day;
 //     date = Date.fromSeconds(tmax);
-//     testing.expect(date.eql(max_date));
-//     testing.expectEqual(date.toSeconds(), tmax);
+//     try testing.expect(date.eql(max_date));
+//     try testing.expectEqual(date.toSeconds(), tmax);
 }
 
 
 test "date-day-of-year" {
     var date = try Date.create(1970, 1, 1);
-    testing.expect(date.dayOfYear() == 1);
+    try testing.expect(date.dayOfYear() == 1);
 }
 
 test "date-day-of-week" {
     var date = try Date.create(2019, 11, 27);
-    testing.expectEqual(date.weekday(), 2);
-    testing.expectEqual(date.dayOfWeek(), .Wednesday);
-    testing.expectEqualSlices(u8, date.monthName(), "November");
-    testing.expectEqualSlices(u8, date.weekdayName(), "Wednesday");
-    testing.expect(!date.isWeekend());
+    try testing.expectEqual(date.weekday(), 2);
+    try testing.expectEqual(date.dayOfWeek(), .Wednesday);
+    try testing.expectEqualSlices(u8, date.monthName(), "November");
+    try testing.expectEqualSlices(u8, date.weekdayName(), "Wednesday");
+    try testing.expect(!date.isWeekend());
 
     date = try Date.create(1776, 6, 4);
-    testing.expectEqual(date.weekday(), 1);
-    testing.expectEqual(date.dayOfWeek(), .Tuesday);
-    testing.expectEqualSlices(u8, date.monthName(), "June");
-    testing.expectEqualSlices(u8, date.weekdayName(), "Tuesday");
-    testing.expect(!date.isWeekend());
+    try testing.expectEqual(date.weekday(), 1);
+    try testing.expectEqual(date.dayOfWeek(), .Tuesday);
+    try testing.expectEqualSlices(u8, date.monthName(), "June");
+    try testing.expectEqualSlices(u8, date.weekdayName(), "Tuesday");
+    try testing.expect(!date.isWeekend());
 
     date = try Date.create(2019, 12, 1);
-    testing.expectEqualSlices(u8, date.monthName(), "December");
-    testing.expectEqualSlices(u8, date.weekdayName(), "Sunday");
-    testing.expect(date.isWeekend());
+    try testing.expectEqualSlices(u8, date.monthName(), "December");
+    try testing.expectEqualSlices(u8, date.weekdayName(), "Sunday");
+    try testing.expect(date.isWeekend());
 }
 
 test "date-shift-days" {
     var date = try Date.create(2019, 11, 27);
     var d = date.shiftDays(-2);
-    testing.expectEqual(d.day, 25);
-    testing.expectEqualSlices(u8, d.weekdayName(), "Monday");
+    try testing.expectEqual(d.day, 25);
+    try testing.expectEqualSlices(u8, d.weekdayName(), "Monday");
 
     // Ahead one week
     d = date.shiftDays(7);
-    testing.expectEqualSlices(u8, d.weekdayName(), date.weekdayName());
-    testing.expectEqual(d.month, 12);
-    testing.expectEqualSlices(u8, d.monthName(), "December");
-    testing.expectEqual(d.day, 4);
+    try testing.expectEqualSlices(u8, d.weekdayName(), date.weekdayName());
+    try testing.expectEqual(d.month, 12);
+    try testing.expectEqualSlices(u8, d.monthName(), "December");
+    try testing.expectEqual(d.day, 4);
 
     d = date.shiftDays(0);
-    testing.expect(date.eql(d));
+    try testing.expect(date.eql(d));
 
 }
 
@@ -586,45 +577,45 @@ test "date-shift-years" {
     // Shift including a leap year
     var date = try Date.create(2019, 11, 27);
     var d = date.shiftYears(-4);
-    testing.expect(d.eql(try Date.create(2015, 11, 27)));
+    try testing.expect(d.eql(try Date.create(2015, 11, 27)));
 
     d = date.shiftYears(15);
-    testing.expect(d.eql(try Date.create(2034, 11, 27)));
+    try testing.expect(d.eql(try Date.create(2034, 11, 27)));
 
     // Shifting from leap day
     var leap_day = try Date.create(2020, 2, 29);
     d = leap_day.shiftYears(1);
-    testing.expect(d.eql(try Date.create(2021, 2, 28)));
+    try testing.expect(d.eql(try Date.create(2021, 2, 28)));
 
     // Before leap day
     date = try Date.create(2020, 2, 2);
     d = date.shiftYears(1);
-    testing.expect(d.eql(try Date.create(2021, 2, 2)));
+    try testing.expect(d.eql(try Date.create(2021, 2, 2)));
 
     // After leap day
     date = try Date.create(2020, 3, 1);
     d = date.shiftYears(1);
-    testing.expect(d.eql(try Date.create(2021, 3, 1)));
+    try testing.expect(d.eql(try Date.create(2021, 3, 1)));
 
     // From leap day to leap day
     d = leap_day.shiftYears(4);
-    testing.expect(d.eql(try Date.create(2024, 2, 29)));
+    try testing.expect(d.eql(try Date.create(2024, 2, 29)));
 
 }
 
 
 test "date-create" {
-    testing.expectError(
+    try testing.expectError(
         error.InvalidDate, Date.create(2019, 2, 29));
 
     var date = Date.fromTimestamp(1574908586928);
-    testing.expect(date.eql(try Date.create(2019, 11, 28)));
+    try testing.expect(date.eql(try Date.create(2019, 11, 28)));
 }
 
 test "date-copy" {
     var d1 = try Date.create(2020, 1, 1);
     var d2 = try d1.copy();
-    testing.expect(d1.eql(d2));
+    try testing.expect(d1.eql(d2));
 }
 
 
@@ -786,15 +777,15 @@ pub const Time = struct {
 
 test "time-create" {
     var t = Time.fromTimestamp(1574908586928);
-    testing.expect(t.hour == 2);
-    testing.expect(t.minute == 36);
-    testing.expect(t.second == 26);
-    testing.expect(t.nanosecond == 928000000);
+    try testing.expect(t.hour == 2);
+    try testing.expect(t.minute == 36);
+    try testing.expect(t.second == 26);
+    try testing.expect(t.nanosecond == 928000000);
 
-    testing.expectError(error.InvalidTime, Time.create(25, 1, 1, 0));
-    testing.expectError(error.InvalidTime, Time.create(1, 60, 1, 0));
-    testing.expectError(error.InvalidTime, Time.create(12, 30, 281, 0));
-    testing.expectError(error.InvalidTime, Time.create(12, 30, 28, 1000000000));
+    try testing.expectError(error.InvalidTime, Time.create(25, 1, 1, 0));
+    try testing.expectError(error.InvalidTime, Time.create(1, 60, 1, 0));
+    try testing.expectError(error.InvalidTime, Time.create(12, 30, 281, 0));
+    try testing.expectError(error.InvalidTime, Time.create(12, 30, 28, 1000000000));
 }
 
 test "time-now" {
@@ -804,42 +795,42 @@ test "time-now" {
 test "time-from-seconds" {
     var seconds: f64 = 15.12;
     var t = Time.fromSeconds(seconds);
-    testing.expect(t.hour == 0);
-    testing.expect(t.minute == 0);
-    testing.expect(t.second == 15);
-    testing.expect(t.nanosecond == 120000000);
-    testing.expect(t.toSeconds() == seconds);
+    try testing.expect(t.hour == 0);
+    try testing.expect(t.minute == 0);
+    try testing.expect(t.second == 15);
+    try testing.expect(t.nanosecond == 120000000);
+    try testing.expect(t.toSeconds() == seconds);
 
     seconds = 315.12; // + 5 min
     t = Time.fromSeconds(seconds);
-    testing.expect(t.hour == 0);
-    testing.expect(t.minute == 5);
-    testing.expect(t.second == 15);
-    testing.expect(t.nanosecond == 120000000);
-    testing.expect(t.toSeconds() == seconds);
+    try testing.expect(t.hour == 0);
+    try testing.expect(t.minute == 5);
+    try testing.expect(t.second == 15);
+    try testing.expect(t.nanosecond == 120000000);
+    try testing.expect(t.toSeconds() == seconds);
 
     seconds = 36000 + 315.12; // + 10 hr
     t = Time.fromSeconds(seconds);
-    testing.expect(t.hour == 10);
-    testing.expect(t.minute == 5);
-    testing.expect(t.second == 15);
-    testing.expect(t.nanosecond == 120000000);
-    testing.expect(t.toSeconds() == seconds);
+    try testing.expect(t.hour == 10);
+    try testing.expect(t.minute == 5);
+    try testing.expect(t.second == 15);
+    try testing.expect(t.nanosecond == 120000000);
+    try testing.expect(t.toSeconds() == seconds);
 
     seconds = 108000 + 315.12; // + 30 hr
     t = Time.fromSeconds(seconds);
-    testing.expect(t.hour == 6);
-    testing.expect(t.minute == 5);
-    testing.expect(t.second == 15);
-    testing.expect(t.nanosecond == 120000000);
-    testing.expectEqual(t.totalSeconds(), 6*3600+315);
+    try testing.expect(t.hour == 6);
+    try testing.expect(t.minute == 5);
+    try testing.expect(t.second == 15);
+    try testing.expect(t.nanosecond == 120000000);
+    try testing.expectEqual(t.totalSeconds(), 6*3600+315);
     //testing.expectAlmostEqual(t.toSeconds(), seconds-time.s_per_day);
 }
 
 test "time-copy" {
     var t1 = try Time.create(8, 30, 0, 0);
     var t2 = try t1.copy();
-    testing.expect(t1.eql(t2));
+    try testing.expect(t1.eql(t2));
 }
 
 test "time-compare" {
@@ -848,10 +839,10 @@ test "time-compare" {
     var t3 = try Time.create(8, 00, 0, 0);
     var t4 = try Time.create(9, 30, 17, 0);
 
-    testing.expect(t1.lt(t2));
-    testing.expect(t1.gt(t3));
-    testing.expect(t2.lt(t4));
-    testing.expect(t3.lt(t4));
+    try testing.expect(t1.lt(t2));
+    try testing.expect(t1.gt(t3));
+    try testing.expect(t2.lt(t4));
+    try testing.expect(t3.lt(t4));
 }
 
 
@@ -1218,10 +1209,10 @@ test "datetime-create-timestamp" {
     //var t = Datetime.now();
     const ts = 1574908586928;
     var t = Datetime.fromTimestamp(ts);
-    testing.expect(t.date.eql(try Date.create(2019, 11, 28)));
-    testing.expect(t.time.eql(try Time.create(2, 36, 26, 928000000)));
-    testing.expectEqualSlices(u8, t.zone.name, "UTC");
-    testing.expectEqual(t.toTimestamp(), ts);
+    try testing.expect(t.date.eql(try Date.create(2019, 11, 28)));
+    try testing.expect(t.time.eql(try Time.create(2, 36, 26, 928000000)));
+    try testing.expectEqualSlices(u8, t.zone.name, "UTC");
+    try testing.expectEqual(t.toTimestamp(), ts);
 }
 
 test "datetime-from-seconds" {
@@ -1229,10 +1220,10 @@ test "datetime-from-seconds" {
     // datetime.datetime(2020, 6, 17, 18, 12, 1, 932644)
     const ts: f64 = 1592417521.9326444;
     var t = Datetime.fromSeconds(ts);
-    testing.expect(t.date.year == 2020);
-    testing.expectEqual(t.date, try Date.create(2020, 6, 17));
-    testing.expectEqual(t.time, try Time.create(18, 12, 1, 932644400));
-    testing.expectEqual(t.toSeconds(), ts);
+    try testing.expect(t.date.year == 2020);
+    try testing.expectEqual(t.date, try Date.create(2020, 6, 17));
+    try testing.expectEqual(t.time, try Time.create(18, 12, 1, 932644400));
+    try testing.expectEqual(t.toSeconds(), ts);
 
 }
 
@@ -1242,57 +1233,57 @@ test "datetime-shift-timezones" {
     const utc = Datetime.fromTimestamp(ts);
     var t = utc.shiftTimezone(&timezones.America.New_York);
 
-    testing.expect(t.date.eql(try Date.create(2019, 11, 27)));
-    testing.expectEqual(t.time.hour, 21);
-    testing.expectEqual(t.time.minute, 36);
-    testing.expectEqual(t.time.second, 26);
-    testing.expectEqual(t.time.nanosecond, 928000000);
-    testing.expectEqualSlices(u8, t.zone.name, "America/New_York");
-    testing.expectEqual(t.toTimestamp(), ts);
+    try testing.expect(t.date.eql(try Date.create(2019, 11, 27)));
+    try testing.expectEqual(t.time.hour, 21);
+    try testing.expectEqual(t.time.minute, 36);
+    try testing.expectEqual(t.time.second, 26);
+    try testing.expectEqual(t.time.nanosecond, 928000000);
+    try testing.expectEqualSlices(u8, t.zone.name, "America/New_York");
+    try testing.expectEqual(t.toTimestamp(), ts);
 
     // Shifting to same timezone has no effect
     const same = t.shiftTimezone(&timezones.America.New_York);
-    testing.expectEqual(t, same);
+    try testing.expectEqual(t, same);
 
     // Shift back works
     const original = t.shiftTimezone(&timezones.UTC);
     //std.debug.warn("\nutc={}\n", .{utc});
     //std.debug.warn("original={}\n", .{original});
-    testing.expect(utc.date.eql(original.date));
-    testing.expect(utc.time.eql(original.time));
-    testing.expect(utc.eql(original));
+    try testing.expect(utc.date.eql(original.date));
+    try testing.expect(utc.time.eql(original.time));
+    try testing.expect(utc.eql(original));
 }
 
 test "datetime-shift" {
     var dt = try Datetime.create(2019, 12, 2, 11, 51, 13, 466545, null);
 
-    testing.expect(dt.shiftYears(0).eql(dt));
-    testing.expect(dt.shiftDays(0).eql(dt));
-    testing.expect(dt.shiftHours(0).eql(dt));
+    try testing.expect(dt.shiftYears(0).eql(dt));
+    try testing.expect(dt.shiftDays(0).eql(dt));
+    try testing.expect(dt.shiftHours(0).eql(dt));
 
     var t = dt.shiftDays(7);
-    testing.expect(t.date.eql(try Date.create(2019, 12, 9)));
-    testing.expect(t.time.eql(dt.time));
+    try testing.expect(t.date.eql(try Date.create(2019, 12, 9)));
+    try testing.expect(t.time.eql(dt.time));
 
     t = dt.shiftDays(-3);
-    testing.expect(t.date.eql(try Date.create(2019, 11, 29)));
-    testing.expect(t.time.eql(dt.time));
+    try testing.expect(t.date.eql(try Date.create(2019, 11, 29)));
+    try testing.expect(t.time.eql(dt.time));
 
     t = dt.shiftHours(18);
-    testing.expect(t.date.eql(try Date.create(2019, 12, 3)));
-    testing.expect(t.time.eql(try Time.create(5, 51, 13, 466545)));
+    try testing.expect(t.date.eql(try Date.create(2019, 12, 3)));
+    try testing.expect(t.time.eql(try Time.create(5, 51, 13, 466545)));
 
     t = dt.shiftHours(-36);
-    testing.expect(t.date.eql(try Date.create(2019, 11, 30)));
-    testing.expect(t.time.eql(try Time.create(23, 51, 13, 466545)));
+    try testing.expect(t.date.eql(try Date.create(2019, 11, 30)));
+    try testing.expect(t.time.eql(try Time.create(23, 51, 13, 466545)));
 
     t = dt.shiftYears(1);
-    testing.expect(t.date.eql(try Date.create(2020, 12, 2)));
-    testing.expect(t.time.eql(dt.time));
+    try testing.expect(t.date.eql(try Date.create(2020, 12, 2)));
+    try testing.expect(t.time.eql(dt.time));
 
     t = dt.shiftYears(-3);
-    testing.expect(t.date.eql(try Date.create(2016, 12, 2)));
-    testing.expect(t.time.eql(dt.time));
+    try testing.expect(t.date.eql(try Date.create(2016, 12, 2)));
+    try testing.expect(t.time.eql(dt.time));
 
 }
 
@@ -1301,7 +1292,7 @@ test "datetime-shift-seconds" {
     const midnight_utc = try Datetime.create(2020, 12, 17, 0, 0, 0, 0, null);
     const midnight_copenhagen = try Datetime.create(
         2020, 12, 17, 1, 0, 0, 0, &timezones.Europe.Copenhagen);
-    testing.expect(midnight_utc.eql(midnight_copenhagen));
+    try testing.expect(midnight_utc.eql(midnight_copenhagen));
 
     // Check rollover issues
     var hour: u8 = 0;
@@ -1313,9 +1304,9 @@ test "datetime-shift-seconds" {
                 const dt_utc = try Datetime.create(2020, 12, 17, hour, minute, sec, 0, null);
                 const dt_cop = dt_utc.shiftTimezone(&timezones.Europe.Copenhagen);
                 const dt_nyc = dt_utc.shiftTimezone(&timezones.America.New_York);
-                testing.expect(dt_utc.eql(dt_cop));
-                testing.expect(dt_utc.eql(dt_nyc));
-                testing.expect(dt_nyc.eql(dt_cop));
+                try testing.expect(dt_utc.eql(dt_cop));
+                try testing.expect(dt_utc.eql(dt_nyc));
+                try testing.expect(dt_nyc.eql(dt_cop));
             }
         }
     }
@@ -1324,40 +1315,40 @@ test "datetime-shift-seconds" {
 test "datetime-compare" {
     var dt1 = try Datetime.create(2019, 12, 2, 11, 51, 13, 466545, null);
     var dt2 = try Datetime.fromDate(2016, 12, 2);
-    testing.expect(dt2.lt(dt1));
+    try testing.expect(dt2.lt(dt1));
 
     var dt3 = Datetime.now();
-    testing.expect(dt3.gt(dt2));
+    try testing.expect(dt3.gt(dt2));
 
     var dt4 = try dt3.copy();
-    testing.expect(dt3.eql(dt4));
+    try testing.expect(dt3.eql(dt4));
 
     var dt5 = dt1.shiftTimezone(&timezones.America.Louisville);
-    testing.expect(dt5.eql(dt1));
+    try testing.expect(dt5.eql(dt1));
 }
 
 test "datetime-subtract" {
      var a = try Datetime.create(2019, 12, 2, 11, 51, 13, 466545, null);
      var b = try Datetime.create(2019, 12, 5, 11, 51, 13, 466545, null);
      var delta = a.sub(b);
-     testing.expectEqual(delta.days, -3);
-     testing.expectEqual(delta.totalSeconds(), -3 * time.s_per_day);
+     try testing.expectEqual(delta.days, -3);
+     try testing.expectEqual(delta.totalSeconds(), -3 * time.s_per_day);
      delta = b.sub(a);
-     testing.expectEqual(delta.days, 3);
-     testing.expectEqual(delta.totalSeconds(), 3 * time.s_per_day);
+     try testing.expectEqual(delta.days, 3);
+     try testing.expectEqual(delta.totalSeconds(), 3 * time.s_per_day);
 
      b = try Datetime.create(2019, 12, 2, 11, 0, 0, 466545, null);
      delta = a.sub(b);
-     testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
+     try testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
 }
 
 test "datetime-parse-modified-since" {
     const str = " Wed, 21 Oct 2015 07:28:00 GMT ";
-    testing.expectEqual(
+    try testing.expectEqual(
         try Datetime.parseModifiedSince(str),
         try Datetime.create(2015, 10, 21, 7, 28, 0, 0, &timezones.GMT));
 
-    testing.expectError(error.InvalidFormat,
+    try testing.expectError(error.InvalidFormat,
         Datetime.parseModifiedSince("21/10/2015"));
 }
 
