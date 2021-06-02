@@ -242,12 +242,12 @@ test "headers-get" {
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
-    testing.expectError(error.KeyError, headers.get("Accept-Type"));
-    testing.expectEqualSlices(u8, try headers.get("cookie"), "Nom;nom;nom");
-    testing.expectEqualSlices(u8, try headers.get("cOOKie"), "Nom;nom;nom");
-    testing.expectEqualSlices(u8,
+    try testing.expectError(error.KeyError, headers.get("Accept-Type"));
+    try testing.expectEqualSlices(u8, try headers.get("cookie"), "Nom;nom;nom");
+    try testing.expectEqualSlices(u8, try headers.get("cOOKie"), "Nom;nom;nom");
+    try testing.expectEqualSlices(u8,
         headers.getDefault("User-Agent" , "zig"), "zig");
-    testing.expectEqualSlices(u8,
+    try testing.expectEqualSlices(u8,
         headers.getDefault("cookie" , "zig"), "Nom;nom;nom");
 }
 
@@ -256,10 +256,10 @@ test "headers-put" {
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
-    testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
+    try testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
     try headers.put("COOKie", "ABC"); // Squash even if different
     std.debug.warn("Cookie is: {s}", .{try headers.get("Cookie")});
-    testing.expectEqualSlices(u8, try headers.get("Cookie"), "ABC");
+    try testing.expectEqualSlices(u8, try headers.get("Cookie"), "ABC");
 }
 
 test "headers-remove" {
@@ -267,21 +267,21 @@ test "headers-remove" {
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
     try headers.put("Cookie", "Nom;nom;nom");
-    testing.expect(headers.contains("Cookie"));
-    testing.expect(headers.contains("COOKIE"));
+    try testing.expect(headers.contains("Cookie"));
+    try testing.expect(headers.contains("COOKIE"));
     try headers.remove("Cookie");
-    testing.expect(!headers.contains("Cookie"));
+    try testing.expect(!headers.contains("Cookie"));
 }
 
 test "headers-pop" {
     const allocator = std.testing.allocator;
     var headers = try Headers.initCapacity(allocator, 64);
     defer headers.deinit();
-    testing.expectError(error.KeyError, headers.pop("Cookie"));
+    try testing.expectError(error.KeyError, headers.pop("Cookie"));
     try headers.put("Cookie", "Nom;nom;nom");
-    testing.expect(mem.eql(u8, try headers.pop("Cookie"), "Nom;nom;nom"));
-    testing.expect(!headers.contains("Cookie"));
-    testing.expect(mem.eql(u8, headers.popDefault("Cookie", "Hello"), "Hello"));
+    try testing.expect(mem.eql(u8, try headers.pop("Cookie"), "Nom;nom;nom"));
+    try testing.expect(!headers.contains("Cookie"));
+    try testing.expect(mem.eql(u8, headers.popDefault("Cookie", "Hello"), "Hello"));
 }
 
 
@@ -303,6 +303,6 @@ test "headers-parse" {
     defer headers.deinit();
     try headers.parseBuffer(HEADERS[0..], 1024);
 
-    testing.expect(mem.eql(u8, try headers.get("Host"), "bs.serving-sys.com"));
-    testing.expect(mem.eql(u8, try headers.get("Connection"), "keep-alive"));
+    try testing.expect(mem.eql(u8, try headers.get("Host"), "bs.serving-sys.com"));
+    try testing.expect(mem.eql(u8, try headers.get("Connection"), "keep-alive"));
 }

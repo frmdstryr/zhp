@@ -12,6 +12,7 @@ const Status = responses.Status;
 const Headers = web.Headers;
 const Request = web.Request;
 const IOStream = web.IOStream;
+const testing = std.testing;
 
 const Bytes = std.ArrayList(u8);
 
@@ -92,13 +93,13 @@ test "response" {
     response.prepare();
     defer response.deinit();
     _ = try response.stream.write("Hello world!\n");
-    std.testing.expectEqualSlices(u8, "Hello world!\n", response.body.items);
+    try testing.expectEqualSlices(u8, "Hello world!\n", response.body.items);
 
     _ = try response.stream.print("{s}\n", .{"Testing!"});
-    std.testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.items);
+    try testing.expectEqualSlices(u8, "Hello world!\nTesting!\n", response.body.items);
     try response.headers.put("Content-Type", "Keep-Alive");
 }
 
 test "response-fns" {
-    std.testing.refAllDecls(Response);
+    testing.refAllDecls(Response);
 }

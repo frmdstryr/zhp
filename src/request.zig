@@ -659,23 +659,23 @@ fn expectParseResult(buf: []const u8,  request: Request) !void {
     var r = try Request.initTest(allocator, &stream);
     try r.parseTest(&stream);
 
-    testing.expectEqual(request.method, r.method);
-    testing.expectEqual(request.version, r.version);
+    try testing.expectEqual(request.method, r.method);
+    try testing.expectEqual(request.version, r.version);
     if (request.scheme != .Unknown) {
-        testing.expectEqual(request.scheme, r.scheme);
+        try testing.expectEqual(request.scheme, r.scheme);
     }
-    testing.expectEqualStrings(request.uri, r.uri);
-    testing.expectEqualStrings(request.path, r.path);
-    testing.expectEqualStrings(request.query, r.query);
-    testing.expectEqualStrings(request.host, r.host);
+    try testing.expectEqualStrings(request.uri, r.uri);
+    try testing.expectEqualStrings(request.path, r.path);
+    try testing.expectEqualStrings(request.query, r.query);
+    try testing.expectEqualStrings(request.host, r.host);
 }
 
-fn expectParseError(err: anyerror, buf: []const u8) void {
+fn expectParseError(err: anyerror, buf: []const u8) !void {
     var buffer: [1024*1024]u8 = undefined;
     const allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
     var stream = IOStream.initTest(allocator, buf) catch unreachable;
     var request = Request.initTest(allocator, &stream) catch unreachable;
-    testing.expectError(err, request.parseTest(&stream));
+    try testing.expectError(err, request.parseTest(&stream));
 }
 
 test "01-parse-request-get" {
@@ -800,7 +800,7 @@ test "01-parse-request-port" {
 }
 
 test "01-invalid-method" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GOT /this/path/is/nonsense HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -809,7 +809,7 @@ test "01-invalid-method" {
 }
 
 test "01-invalid-host-char" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET http://not;valid/ HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -818,7 +818,7 @@ test "01-invalid-host-char" {
 }
 
 test "01-invalid-host-scheme" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET htx://192.168.0.0/ HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -827,7 +827,7 @@ test "01-invalid-host-scheme" {
 }
 
 test "01-invalid-host-scheme-1" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET HTTP:/localhost/ HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -836,7 +836,7 @@ test "01-invalid-host-scheme-1" {
 }
 
 test "01-invalid-host-port" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET HTTP://localhost:aef/ HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -845,7 +845,7 @@ test "01-invalid-host-port" {
 }
 
 test "01-invalid-method-2" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\DEL TE /api/users/12/ HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -854,7 +854,7 @@ test "01-invalid-method-2" {
 }
 
 test "01-no-space" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET/this/path/is/nonsense HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -863,7 +863,7 @@ test "01-no-space" {
 }
 
 test "01-bad-url" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET 0000000000000000000000000 HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -872,7 +872,7 @@ test "01-bad-url" {
 }
 
 test "01-bad-url-character" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         "GET /"++ [_]u8{0} ++"/ HTTP/1.1\r\n" ++
         "Accept: */*\r\n" ++
         "\r\n\r\n"
@@ -880,7 +880,7 @@ test "01-bad-url-character" {
 }
 
 test "01-bad-url-character-2" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         "GET /\t HTTP/1.1\r\n" ++
         "Accept: */*\r\n" ++
         "\r\n\r\n"
@@ -888,7 +888,7 @@ test "01-bad-url-character-2" {
 }
 
 test "01-bad-query" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET /this/is?query1?query2 HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -898,7 +898,7 @@ test "01-bad-query" {
 
 
 test "01-empty-request-line" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\
         \\Host: localhost:8000
         \\
@@ -907,7 +907,7 @@ test "01-empty-request-line" {
 }
 
 test "01-unsupported-version" {
-    expectParseError(error.UnsupportedHttpVersion,
+    try expectParseError(error.UnsupportedHttpVersion,
         \\GET / HTTP/7.1
         \\Host: localhost:8000
         \\
@@ -916,7 +916,7 @@ test "01-unsupported-version" {
 }
 
 test "01-version-malformed" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET / HXX/1.1
         \\Host: localhost:8000
         \\
@@ -925,7 +925,7 @@ test "01-version-malformed" {
 }
 
 test "01-url-malformed" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET /what?are? HTTP/1.1
         \\Host: localhost:8000
         \\
@@ -934,7 +934,7 @@ test "01-url-malformed" {
 }
 
 test "01-empty-header" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET /api/something/ HTTP/1.0
         \\: localhost:8000
         \\
@@ -943,7 +943,7 @@ test "01-empty-header" {
 }
 
 test "01-invalid-header-name" {
-    expectParseError(error.BadRequest,
+    try expectParseError(error.BadRequest,
         \\GET /api/something/ HTTP/1.0
         \\Host?: localhost:8000
         \\
@@ -954,7 +954,7 @@ test "01-invalid-header-name" {
 test "01-header-too-long" {
     const opts = Request.ParseOptions{};
     const name = [_]u8{'x'} ** (opts.max_header_size+1024);
-    expectParseError(error.RequestHeaderFieldsTooLarge,
+    try expectParseError(error.RequestHeaderFieldsTooLarge,
         "GET /api/something/ HTTP/1.0\r\n" ++
         name ++ ": foo\r\n" ++
         "\r\n\r\n"
@@ -962,14 +962,14 @@ test "01-header-too-long" {
 }
 
 test "01-partial-request" {
-    expectParseError(error.EndOfBuffer,
+    try expectParseError(error.EndOfBuffer,
         "GET /api/something/ HTTP/1.0\r\n" ++
         "Host: localhost\r"
     );
 }
 
 test "01-partial-request-line" {
-    expectParseError(error.EndOfBuffer,
+    try expectParseError(error.EndOfBuffer,
         "GET /api/somethithing/long/path/slow"
     );
 }
@@ -982,13 +982,13 @@ test "02-parse-request-multiple" {
     var stream = try IOStream.initTest(allocator, REQUESTS);
     var request = try Request.initTest(allocator, &stream);
     try request.parseTest(&stream);
-    testing.expectEqualSlices(u8, request.path,
+    try testing.expectEqualSlices(u8, request.path,
         "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
     try request.parseTest(&stream);
-    testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
+    try testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
     try request.parseTest(&stream);
     // I have no idea why but this seems to mess up the speed of the next test
-    //testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
+    //try testing.expectEqualSlices(u8, request.path, "/BurstingPipe/adServer.bs");
 
 }
 
@@ -1023,23 +1023,23 @@ test "03-bench-parse-request-line" {
 
     //stream.load("POST CRAP");
     //request = try Request.init(allocator);
-    //testing.expectError(error.BadRequest,
+    //try testing.expectError(error.BadRequest,
     //    request.parseRequestLine(&stream, 0));
 
 //     var line = try Request.StartLine.parse(a, "GET /foo HTTP/1.1");
-//     testing.expect(mem.eql(u8, line.method, "GET"));
-//     testing.expect(mem.eql(u8, line.path, "/foo"));
-//     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
+//     try testing.expect(mem.eql(u8, line.method, "GET"));
+//     try testing.expect(mem.eql(u8, line.path, "/foo"));
+//     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
 //     line = try RequestStartLine.parse("POST / HTTP/1.1");
-//     testing.expect(mem.eql(u8, line.method, "POST"));
-//     testing.expect(mem.eql(u8, line.path, "/"));
-//     testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
+//     try testing.expect(mem.eql(u8, line.method, "POST"));
+//     try testing.expect(mem.eql(u8, line.path, "/"));
+//     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
 //
-//     testing.expectError(error.BadRequest,
+//     try testing.expectError(error.BadRequest,
 //             RequestStartLine.parse(a, "POST CRAP"));
-//     testing.expectError(error.BadRequest,
+//     try testing.expectError(error.BadRequest,
 //             RequestStartLine.parse(a, "POST /theform/ HTTP/1.1 DROP ALL TABLES"));
-//     testing.expectError(error.UnsupportedHttpVersion,
+//     try testing.expectError(error.UnsupportedHttpVersion,
 //             RequestStartLine.parse(a, "POST / HTTP/2.0"));
 }
 
@@ -1063,18 +1063,18 @@ test "04-parse-request-headers" {
     try request.parseTest(&stream);
     var h = &request.headers;
 
-    testing.expectEqual(@as(usize, 6), h.headers.items.len);
+    try testing.expectEqual(@as(usize, 6), h.headers.items.len);
 
-    testing.expectEqualSlices(u8, "server", try h.get("Host"));
-    testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00",
+    try testing.expectEqualSlices(u8, "server", try h.get("Host"));
+    try testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00",
         try h.get("User-Agent"));
-    testing.expectEqualSlices(u8, "uid=012345678901234532323; __utma=1.1234567890.1234567890.1234567890.1234567890.12; wd=2560x1600",
+    try testing.expectEqualSlices(u8, "uid=012345678901234532323; __utma=1.1234567890.1234567890.1234567890.1234567890.12; wd=2560x1600",
         try h.get("Cookie"));
-    testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         try h.get("Accept"));
-    testing.expectEqualSlices(u8, "en-US,en;q=0.5",
+    try testing.expectEqualSlices(u8, "en-US,en;q=0.5",
         try h.get("Accept-Language"));
-    testing.expectEqualSlices(u8, "keep-alive",
+    try testing.expectEqualSlices(u8, "keep-alive",
         try h.get("Connection"));
 
 }
@@ -1089,34 +1089,34 @@ test "04-parse-request-cookies" {
     try request.parseTest(&stream);
     const h = &request.headers;
 
-    testing.expectEqual(@as(usize, 9), h.headers.items.len);
+    try testing.expectEqual(@as(usize, 9), h.headers.items.len);
 
-    testing.expectEqualSlices(u8, "www.kittyhell.com", try h.get("Host"));
-    testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9",
+    try testing.expectEqualSlices(u8, "www.kittyhell.com", try h.get("Host"));
+    try testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9",
         try h.get("User-Agent"));
-    testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         try h.get("Accept"));
-    testing.expectEqualSlices(u8, "ja,en-us;q=0.7,en;q=0.3",
+    try testing.expectEqualSlices(u8, "ja,en-us;q=0.7,en;q=0.3",
         try h.get("Accept-Language"));
-    testing.expectEqualSlices(u8, "gzip,deflate",
+    try testing.expectEqualSlices(u8, "gzip,deflate",
         try h.get("Accept-Encoding"));
-    testing.expectEqualSlices(u8, "Shift_JIS,utf-8;q=0.7,*;q=0.7",
+    try testing.expectEqualSlices(u8, "Shift_JIS,utf-8;q=0.7,*;q=0.7",
         try h.get("Accept-Charset"));
-    testing.expectEqualSlices(u8, "115",
+    try testing.expectEqualSlices(u8, "115",
         try h.get("Keep-Alive"));
-    testing.expectEqualSlices(u8, "keep-alive",
+    try testing.expectEqualSlices(u8, "keep-alive",
         try h.get("Connection"));
-    testing.expectEqualSlices(u8,
+    try testing.expectEqualSlices(u8,
         "wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; " ++
         "__utma=xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x; " ++
         "__utmz=xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral",
         try h.get("Cookie"));
 
     const cookies = (try request.readCookies()).?;
-    testing.expectEqualStrings("2", try cookies.get("wp_ozh_wsa_visits"));
-    testing.expectEqualStrings("xxxxxxxxxx", try cookies.get("wp_ozh_wsa_visit_lasttime"));
-    testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x", try cookies.get("__utma"));
-    testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral", try cookies.get("__utmz"));
+    try testing.expectEqualStrings("2", try cookies.get("wp_ozh_wsa_visits"));
+    try testing.expectEqualStrings("xxxxxxxxxx", try cookies.get("wp_ozh_wsa_visit_lasttime"));
+    try testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x", try cookies.get("__utma"));
+    try testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral", try cookies.get("__utmz"));
 
 }
 

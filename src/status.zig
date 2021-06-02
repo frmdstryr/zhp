@@ -172,15 +172,15 @@ pub fn getOrCreate(status_code: u16, phrase: []const u8) Status {
 
 test "Status.create" {
     const status = create(200, "OK",  "Request fulfilled, document follows");
-    testing.expectEqual(status.code, OK.code);
-    testing.expectEqualSlices(u8, status.phrase, OK.phrase);
-    testing.expectEqualSlices(u8, status.description, OK.description);
+    try testing.expectEqual(status.code, OK.code);
+    try testing.expectEqualSlices(u8, status.phrase, OK.phrase);
+    try testing.expectEqualSlices(u8, status.description, OK.description);
 }
 
 test "Status.get" {
-    testing.expectEqual(get(200).?, OK);
-    testing.expectEqual(get(600), null);
+    try testing.expectEqual(get(200).?, OK);
+    try testing.expectEqual(get(600), null);
     const status = getOrCreate(600, "Unknown");
-    testing.expectEqual(status.code, 600);
-    testing.expectEqualSlices(u8, status.phrase, "Unknown");
+    try testing.expectEqual(status.code, 600);
+    try testing.expectEqualSlices(u8, status.phrase, "Unknown");
 }

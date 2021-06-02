@@ -6,6 +6,7 @@
 const std = @import("std");
 const mem = std.mem;
 const simd = @import("simd.zig");
+const testing = std.testing;
 
 const Section = struct {
     pub const Type = enum {
@@ -195,7 +196,7 @@ fn expectRender(comptime T: type, context: anytype, result: []const u8) !void {
     var buf: [4096]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buf);
     try T.render(context, stream.writer());
-    std.testing.expectEqualStrings(result, stream.getWritten());
+    try testing.expectEqualStrings(result, stream.getWritten());
 }
 
 test "template-variable" {
@@ -261,7 +262,7 @@ test "template-yield" {
             try s.render(context, writer);
         }
     }
-    std.testing.expectEqualStrings("Before then after", stream.getWritten());
+    try testing.expectEqualStrings("Before then after", stream.getWritten());
 }
 
 test "template-yield-variables" {
@@ -284,5 +285,5 @@ test "template-yield-variables" {
             try s.render(context, writer);
         }
     }
-    std.testing.expectEqualStrings("All your base are belong to us", stream.getWritten());
+    try testing.expectEqualStrings("All your base are belong to us", stream.getWritten());
 }

@@ -177,8 +177,8 @@ test "simple-form" {
     var form = Form.init(std.testing.allocator);
     defer form.deinit();
     try form.parseMultipart(content_type, body);
-    testing.expectEqualStrings("Your name", form.fields.get("name").?);
-    testing.expectEqualStrings("1", form.fields.get("action").?);
+    try testing.expectEqualStrings("Your name", form.fields.get("name").?);
+    try testing.expectEqualStrings("1", form.fields.get("action").?);
 }
 
 test "simple-file-form" {
@@ -194,8 +194,8 @@ test "simple-file-form" {
     defer form.deinit();
     try form.parseMultipart(content_type, body);
     const f = form.files.get("files").?;
-    testing.expectEqualStrings(f.filename, "ab.txt");
-    testing.expectEqualStrings(f.body, "Hello!\n");
+    try testing.expectEqualStrings(f.filename, "ab.txt");
+    try testing.expectEqualStrings(f.body, "Hello!\n");
 }
 
 test "multi-file-form" {
@@ -215,11 +215,11 @@ test "multi-file-form" {
     defer form.deinit();
     try form.parseMultipart(content_type, body);
     const f = form.files.getArray("files").?;
-    testing.expect(f.items.len == 2);
-    testing.expectEqualStrings(f.items[0].filename, "ab.txt");
-    testing.expectEqualStrings(f.items[0].body, "Hello!\n");
-    testing.expectEqualStrings(f.items[1].filename, "data.json");
-    testing.expectEqualStrings(f.items[1].content_type, "application/json");
+    try testing.expect(f.items.len == 2);
+    try testing.expectEqualStrings(f.items[0].filename, "ab.txt");
+    try testing.expectEqualStrings(f.items[0].body, "Hello!\n");
+    try testing.expectEqualStrings(f.items[1].filename, "data.json");
+    try testing.expectEqualStrings(f.items[1].content_type, "application/json");
 }
 
 
@@ -262,9 +262,9 @@ test "parse-content-disposition-header" {
     var params = try Headers.initCapacity(allocator, 5);
     defer params.deinit();
     var v = try parseHeader(allocator, d, &params);
-    testing.expectEqualSlices(u8, "form-data", v);
-    testing.expectEqualSlices(u8, "fieldName", try params.get("name"));
-    testing.expectEqualSlices(u8, "filename.jpg", try params.get("filename"));
+    try testing.expectEqualSlices(u8, "form-data", v);
+    try testing.expectEqualSlices(u8, "fieldName", try params.get("name"));
+    try testing.expectEqualSlices(u8, "filename.jpg", try params.get("filename"));
 }
 
 /// Inverse of parseHeader.
@@ -302,14 +302,14 @@ test "encode-header" {
     defer params.deinit();
 
     var r = try encodeHeader(allocator, "permessage-deflate", params);
-    testing.expectEqualSlices(u8, "permessage-deflate", r);
+    try testing.expectEqualSlices(u8, "permessage-deflate", r);
     allocator.free(r);
 
     try params.append("client_no_context_takeover", "");
     try params.append("client_max_window_bits", "15");
 
     r = try encodeHeader(allocator, "permessage-deflate", params);
-    testing.expectEqualSlices(u8, r,
+    try testing.expectEqualSlices(u8, r,
         "permessage-deflate; client_no_context_takeover; client_max_window_bits=15");
     allocator.free(r);
 

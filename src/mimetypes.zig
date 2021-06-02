@@ -360,9 +360,9 @@ test "guess-ext" {
     defer registry.deinit();
     try registry.load();
 
-    testing.expectEqualSlices(u8,
+    try testing.expectEqualSlices(u8,
         "image/png", registry.getTypeFromFilename("an-image.png").?);
-    testing.expectEqualSlices(u8,
+    try testing.expectEqualSlices(u8,
         "application/javascript", registry.getTypeFromFilename("wavascript.js").?);
 
 }
@@ -373,7 +373,7 @@ test "guess-ext-from-file" {
     try registry.load();
 
     // This ext is not in the list above
-    testing.expectEqualSlices(u8,
+    try testing.expectEqualSlices(u8,
         "application/x-7z-compressed", registry.getTypeFromFilename("archive.7z").?);
 
 }
@@ -384,7 +384,7 @@ test "guess-ext-unknown" {
     try registry.load();
 
     // This ext is not in the list above
-    testing.expect(registry.getTypeFromFilename("notanext") == null);
+    try testing.expect(registry.getTypeFromFilename("notanext") == null);
 
 }
 

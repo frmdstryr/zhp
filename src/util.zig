@@ -21,9 +21,9 @@ pub fn isCtrlChar(ch: u8) callconv(.Inline) bool {
 
 
 test "is-control-char" {
-    testing.expect(isCtrlChar('A') == false);
-    testing.expect(isCtrlChar('\t') == false);
-    testing.expect(isCtrlChar('\r') == true);
+    try testing.expect(isCtrlChar('A') == false);
+    try testing.expect(isCtrlChar('\t') == false);
+    try testing.expect(isCtrlChar('\r') == true);
 }
 
 const token_map = [_]u1{
@@ -589,7 +589,7 @@ test "object-pool" {
     defer pool.deinit();
 
     // Pool is empty
-    testing.expect(pool.get() == null);
+    try testing.expect(pool.get() == null);
 
     // Create
     var test_point = Point{.x=10, .y=3};
@@ -597,13 +597,13 @@ test "object-pool" {
     pt.* = test_point;
 
     // Pool is still empty
-    testing.expect(pool.get() == null);
+    try testing.expect(pool.get() == null);
 
     // Relase
     pool.release(pt);
 
     // Should get the same thing back
-    testing.expectEqual(pool.get().?.*, test_point);
+    try testing.expectEqual(pool.get().?.*, test_point);
 }
 
 
@@ -682,7 +682,7 @@ test "string-array-map" {
     try map.append("query", "b");
     try map.append("query", "c");
     const query = map.getArray("query").?;
-    testing.expect(query.items.len == 3);
-    testing.expect(mem.eql(u8, query.items[0], "a"));
+    try testing.expect(query.items.len == 3);
+    try testing.expect(mem.eql(u8, query.items[0], "a"));
 
 }

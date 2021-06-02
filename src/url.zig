@@ -36,7 +36,7 @@ test "url-encode" {
     const encoded = try encode(&buf,
         "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
         "fp4Q/xXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg=");
-    testing.expectEqualStrings(
+    try testing.expectEqualStrings(
         "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
         "fp4Q%2FxXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg%3D", encoded);
 }
@@ -73,7 +73,7 @@ test "url-decode" {
     const decoded = try decode(&buf,
         "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
         "fp4Q%2FxXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg%3D");
-    testing.expectEqualStrings(
+    try testing.expectEqualStrings(
         "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
         "fp4Q/xXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg=", decoded);
 }
@@ -94,7 +94,7 @@ pub fn findHost(url: []const u8) []const u8 {
 
 test "url-find-host" {
     const url = "http://localhost:9000";
-    testing.expectEqualStrings("localhost:9000", findHost(url));
+    try testing.expectEqualStrings("localhost:9000", findHost(url));
     const url2 = "localhost:9000";
-    testing.expectEqualStrings("localhost:9000", findHost(url2));
+    try testing.expectEqualStrings("localhost:9000", findHost(url2));
 }
