@@ -120,7 +120,7 @@ const StreamHandler = struct {
 /// requests.
 const JsonHandler = struct {
     // Static storage
-    var counter = std.atomic.Int(usize).init(0);
+    var counter = std.atomic.Atomic(usize).init(0);
 
     pub fn get(self: *JsonHandler, req: *Request, resp: *Response) !void {
         try resp.headers.append("Content-Type", "application/json");
@@ -146,7 +146,7 @@ const JsonHandler = struct {
         }
 
         try jw.objectField("Request-Count");
-        try jw.emitNumber(counter.fetchAdd(1));
+        try jw.emitNumber(counter.fetchAdd(1, .Monotonic));
 
         try jw.endObject();
     }
@@ -257,7 +257,7 @@ const ChatHandler = struct {
 
 /// Demonstrates the useage of the websocket protocol
 const ChatWebsocketHandler = struct {
-    var client_id = std.atomic.Int(usize).init(0);
+    var client_id = std.atomic.Atomic(usize).init(0);
     var chat_handlers = std.ArrayList(*ChatWebsocketHandler).init(&gpa.allocator);
 
     websocket: web.Websocket,
@@ -276,7 +276,7 @@ const ChatWebsocketHandler = struct {
         try jw.objectField("type");
         try jw.emitString("id");
         try jw.objectField("id");
-        try jw.emitNumber(client_id.fetchAdd(1));
+        try jw.emitNumber(client_id.fetchAdd(1, .Monotonic));
         try jw.objectField("date");
         try jw.emitNumber(std.time.milliTimestamp());
         try jw.endObject();
