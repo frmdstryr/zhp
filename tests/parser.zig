@@ -32,7 +32,7 @@ pub fn main() !void {
         var socket = net.Stream{.handle=file.handle}; // HACK...
         const cnt = try parseRequests(socket);
         std.debug.warn("Done! ({} ns/req)\n", .{timer.read() / t.count});
-        std.testing.expectEqual(t.count, cnt);
+        try std.testing.expectEqual(t.count, cnt);
     }
 }
 
