@@ -12,6 +12,7 @@ const Stream = std.net.Stream;
 const assert = std.debug.assert;
 
 pub const Bytes = std.ArrayList(u8);
+pub const native_endian = std.builtin.target.cpu.arch.endian();
 
 
 pub fn isCtrlChar(ch: u8) callconv(.Inline) bool {
@@ -264,7 +265,7 @@ pub const IOStream = struct {
             try self.fillBuffer();
         }
         const d = @bitCast(I, self.readBuffered()[0..n].*);
-        const r = if (std.builtin.endian != endian) @byteSwap(I, d) else d;
+        const r = if (endian != native_endian) @byteSwap(I, d) else d;
         self.skipBytes(n);
         return @bitCast(T, r);
     }
