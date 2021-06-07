@@ -657,7 +657,7 @@ pub fn StringArrayMap(comptime T: type) type {
         // Return entire set
         pub fn getArray(self: *Self, name: []const u8) ?*Array {
             if (self.storage.getEntry(name)) |entry| {
-                return entry.value;
+                return entry.value_ptr.*;
             }
             return null;
         }
