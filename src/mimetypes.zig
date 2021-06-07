@@ -253,10 +253,11 @@ pub const Registry = struct {
 
         if (self.type_map_inv.getEntry(mime_type)) |entry| {
             // Check if it's already there
-            for (entry.value.items) |e| {
+            const type_map = entry.value_ptr.*;
+            for (type_map.items) |e| {
                 if (mem.eql(u8, e, ext)) return; // Already there
             }
-            try entry.value.append(ext);
+            try type_map.append(ext);
         } else {
             // Create a new list of extensions
             const extensions = try allocator.create(StringArray);
@@ -327,14 +328,14 @@ pub const Registry = struct {
     // Guess the type of a file based on its URL.
     pub fn getTypeFromExtension(self: *Registry, ext: []const u8) ?[]const u8 {
         if (self.type_map.getEntry(ext)) |entry| {
-            return entry.value;
+            return entry.value_ptr.*;
         }
         return null;
     }
 
     pub fn getExtensionsByType(self: *Registry, mime_type: []const u8) ?*StringArray {
         if (self.type_map_inv.getEntry(mime_type)) |entry| {
-            return entry.value;
+            return entry.value_ptr.*;
         }
         return null;
     }
