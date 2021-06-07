@@ -224,7 +224,7 @@ pub const Request = struct {
         }
     }
 
-    fn parseTest(self: *Request, stream: *IOStream) callconv(.Inline) !void {
+    inline fn parseTest(self: *Request, stream: *IOStream) !void {
         return self.parseNoSwap(stream, .{});
     }
 

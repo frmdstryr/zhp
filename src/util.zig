@@ -15,7 +15,7 @@ pub const Bytes = std.ArrayList(u8);
 pub const native_endian = std.builtin.target.cpu.arch.endian();
 
 
-pub fn isCtrlChar(ch: u8) callconv(.Inline) bool {
+pub inline fn isCtrlChar(ch: u8) bool {
     return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
 }
 
@@ -49,7 +49,7 @@ const token_map = [_]u1{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-pub fn isTokenChar(ch: u8) callconv(.Inline) bool {
+pub inline fn isTokenChar(ch: u8) bool {
     return token_map[ch] == 1;
 }
 
@@ -222,30 +222,30 @@ pub const IOStream = struct {
     }
 
     // Return the amount of bytes waiting in the input buffer
-    pub fn amountBuffered(self: *Self) callconv(.Inline) usize {
+    pub inline fn amountBuffered(self: *Self) usize {
         return self._in_end_index-self._in_start_index;
     }
 
-    pub fn isEmpty(self: *Self) callconv(.Inline) bool {
+    pub inline fn isEmpty(self: *Self) bool {
         return self._in_end_index == self._in_start_index;
     }
 
-    pub fn readCount(self: *Self) callconv(.Inline) usize {
+    pub inline fn readCount(self: *Self) usize {
         //return self._in_count + self._in_start_index;
         return self._in_start_index;
     }
 
-    pub fn consumeBuffered(self: *Self, size: usize) callconv(.Inline) usize {
+    pub inline fn consumeBuffered(self: *Self, size: usize) usize {
         const n = math.min(size, self.amountBuffered());
         self._in_start_index += n;
         return n;
     }
 
-    pub fn skipBytes(self: *Self, n: usize) callconv(.Inline) void {
+    pub inline fn skipBytes(self: *Self, n: usize) void {
         self._in_start_index += n;
     }
 
-    pub fn readBuffered(self: *Self) callconv(.Inline) []u8 {
+    pub inline fn readBuffered(self: *Self) []u8 {
         return self.in_buffer[self._in_start_index..self._in_end_index];
     }
 
@@ -349,20 +349,20 @@ pub const IOStream = struct {
         return c;
     }
 
-    pub fn readByteSafe(self: *Self) callconv(.Inline) !u8 {
+    pub inline fn readByteSafe(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
             return error.EndOfBuffer;
         }
         return self.readByteUnsafe();
     }
 
-    pub fn readByteUnsafe(self: *Self) callconv(.Inline) u8 {
+    pub inline fn readByteUnsafe(self: *Self) u8 {
         const c = self.in_buffer[self._in_start_index];
         self._in_start_index += 1;
         return c;
     }
 
-    pub fn lastByte(self: *Self) callconv(.Inline) u8 {
+    pub inline fn lastByte(self: *Self) u8 {
         return self.in_buffer[self._in_start_index];
     }
 
@@ -627,7 +627,7 @@ pub fn StringArrayMap(comptime T: type) type {
             // Deinit each array
             var it = self.storage.iterator();
             while (it.next()) |entry| {
-                const array = entry.value;
+                const array = entry.value_ptr.*;
                 array.deinit();
                 self.allocator.destroy(array);
             }
@@ -638,7 +638,7 @@ pub fn StringArrayMap(comptime T: type) type {
             // Deinit each array
             var it = self.storage.iterator();
             while (it.pop()) |entry| {
-                const array = entry.value;
+                const array = entry.value_ptr.*;
                 array.deinit();
                 self.allocator.destroy(array);
             }
