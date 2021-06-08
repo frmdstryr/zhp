@@ -76,3 +76,28 @@ pub fn main() anyerror!void {
 }
 
 ```
+
+## How to use in your project.
+
+We have zigmod support so you can import this package via zigmod.
+
+Otherise, use this:
+
+```zig
+const zhp = std.build.Pkg{
+    .name = "zhp",
+    .path = "path/to/zhp/src/zhp.zig",
+    .dependencies = &[_]std.build.Pkg{
+        std.build.Pkg{
+            .name = "ctregex",
+            .path = "path/to/zhp/src/bundled_depends/ctregex/ctregex.zig",
+        },
+        std.build.Pkg{
+            .name = "datetime",
+            .path = "path/to/zhp/src/bundled_depends/datetime/datetime.zig",
+        },
+    },
+};
+
+exe.addPackage(zhp);
+```

@@ -26,7 +26,7 @@ const IOStream = util.IOStream;
 const handlers = web.handlers;
 
 const root = @import("root");
-const regex = @import("ctregex.zig");
+const regex = @import("ctregex");
 
 
 // A handler is simply a a factory function which returns a RequestHandler
