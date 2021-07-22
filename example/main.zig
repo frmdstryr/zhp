@@ -264,6 +264,10 @@ const ChatWebsocketHandler = struct {
     stream: ?web.websocket.Writer(1024, .Text) = null,
     username: []const u8 = "",
 
+    pub fn selectProtocol(req: *Request, resp: *Response) !void {
+        try resp.headers.append("Sec-WebSocket-Protocol", "json");
+    }
+
     pub fn connected(self: *ChatWebsocketHandler) !void {
         std.log.debug("Websocket connected!", .{});
 

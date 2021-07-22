@@ -347,6 +347,14 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
             try response.headers.append("Connection", "Upgrade");
             try response.headers.append("Upgrade", "websocket");
             try response.headers.append("Sec-WebSocket-Accept", key);
+
+            // Optionally select a subprotocol
+            // The function should set the Sec-WebSocket-Protocol
+            // or return BadRequest
+            if (@hasDecl(Protocol, "selectProtocol")) {
+                try Protocol.selectProtocol(request, response);
+            }
+
             response.send_stream = true;
             response.status = web.responses.SWITCHING_PROTOCOLS;
         }
