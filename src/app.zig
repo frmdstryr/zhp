@@ -638,7 +638,7 @@ pub const Application = struct {
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
-        log.info("Listing on {s}:{d}\n", .{address, port});
+        log.info("Listening on http://{s}:{d}", .{address, port});
     }
 
     // Start serving requests For each incoming connection.
