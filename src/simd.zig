@@ -50,7 +50,7 @@ pub fn lastIndexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?us
     const k = delimiter.len;
     const V8x32 = @Vector(n, T);
     const V1x32 = @Vector(n, u1);
-    const Vbx32 = @Vector(n, bool);
+    //const Vbx32 = @Vector(n, bool);
     const first = @splat(n, delimiter[0]);
     const last = @splat(n, delimiter[k-1]);
 

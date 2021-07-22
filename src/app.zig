@@ -42,6 +42,7 @@ pub fn createHandler(comptime T: type) Handler {
     const RequestHandler = struct {
 
         pub fn execute(app: *Application, server_request: *ServerRequest) anyerror!void {
+            _ = app;
             const request = &server_request.request;
             const response = &server_request.response;
 
@@ -69,7 +70,7 @@ pub fn createHandler(comptime T: type) Handler {
                         return try self.dispatch(request, response);
                     } else {
                         inline for (std.meta.fields(Request.Method)) |f| {
-                            comptime const name = [_]u8{std.ascii.toLower(f.name[0])} ++ f.name[1..];
+                            const name = comptime [_]u8{std.ascii.toLower(f.name[0])} ++ f.name[1..];
                             if (@hasDecl(T, name)) {
                                 if (request.method == @intToEnum(Request.Method, f.value)) {
                                     const handler = @field(self, name);
@@ -217,7 +218,7 @@ pub const ServerConnection = struct {
         self.address = conn.address;
         const app = self.application;
         const params = &app.options;
-        const stream = &self.io.writer();
+        //const stream = &self.io.writer();
         self.io.reinit(conn.stream);
         defer self.io.close();
 
@@ -345,6 +346,7 @@ pub const ServerConnection = struct {
     }
 
     fn canKeepAlive(self: *ServerConnection, request: *Request) bool {
+        _ = self;
         const headers = &request.headers;
         if (request.version == .Http1_1) {
             return !headers.eqlIgnoreCase("Connection", "close");
@@ -733,7 +735,7 @@ pub const Application = struct {
     }
 
     pub fn processResponse(self: *Application, server_request: *ServerRequest) !void {
-        const request = &server_request.request;
+        //const request = &server_request.request;
         const response = &server_request.response;
 
         // Add server headers

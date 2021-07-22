@@ -21,6 +21,8 @@ const TemplateHandler = struct {
     const template = @embedFile("templates/cover.html");
 
     pub fn get(self: *TemplateHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         @setEvalBranchQuota(100000);
         try resp.stream.print(template, .{"ZHP"});
     }
@@ -33,6 +35,8 @@ const TemplateHandler = struct {
 /// in memory until the handler completes.
 const HelloHandler = struct {
     pub fn get(self: *HelloHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         try resp.headers.append("Content-Type", "text/plain");
         try resp.stream.writeAll("Hello, World!");
     }
@@ -123,6 +127,7 @@ const JsonHandler = struct {
     var counter = std.atomic.Atomic(usize).init(0);
 
     pub fn get(self: *JsonHandler, req: *Request, resp: *Response) !void {
+        _ = self;
         try resp.headers.append("Content-Type", "application/json");
 
         var jw = std.json.writeStream(resp.stream, 4);
@@ -158,6 +163,7 @@ const JsonHandler = struct {
 /// `request.args` is the result of ctregex's parsing of the url.
 const ApiHandler = struct {
     pub fn get(self: *ApiHandler, req: *Request, resp: *Response) !void {
+        _ = self;
         try resp.headers.append("Content-Type", "application/json");
 
         var jw = std.json.writeStream(resp.stream, 4);
@@ -174,6 +180,8 @@ const ApiHandler = struct {
 /// When an error is returned the framework will return the error handler response
 const ErrorTestHandler = struct {
     pub fn get(self: *ErrorTestHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         try resp.stream.writeAll("Do some work");
         return error.Ooops;
     }
@@ -185,6 +193,8 @@ const ErrorTestHandler = struct {
 const RedirectHandler = struct {
     // Shows how to redirect
     pub fn get(self: *RedirectHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         // Redirect to home
         try resp.redirect("/");
     }
@@ -200,6 +210,8 @@ const FormHandler = struct {
     const end = start + key.len;
 
     pub fn get(self: *FormHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         // Split the template on the key
         const form =
         \\<form action="/form/" method="post" enctype="multipart/form-data">
@@ -215,6 +227,7 @@ const FormHandler = struct {
     }
 
     pub fn post(self: *FormHandler, req: *Request, resp: *Response) !void {
+        _ = self;
         var content_type = req.headers.getDefault("Content-Type", "");
         if (std.mem.startsWith(u8, content_type, "multipart/form-data")) {
             var form = web.forms.Form.init(resp.allocator);
@@ -234,6 +247,7 @@ const FormHandler = struct {
             );
 
             if (form.fields.get("agree")) |f| {
+                _ = f;
                 try resp.stream.writeAll("Me too!");
             } else {
                 try resp.stream.writeAll("Aww sorry!");
@@ -250,6 +264,8 @@ const FormHandler = struct {
 const ChatHandler = struct {
     const template = @embedFile("templates/chat.html");
     pub fn get(self: *ChatHandler, req: *Request, resp: *Response) !void {
+        _ = self;
+        _ = req;
         try resp.stream.writeAll(template);
     }
 };
@@ -290,6 +306,8 @@ const ChatWebsocketHandler = struct {
     }
 
     pub fn onMessage(self: *ChatWebsocketHandler, message: []const u8, binary: bool) !void {
+        _ = self;
+        _ = binary;
         std.log.debug("Websocket message: {s}", .{message});
         const allocator = self.websocket.response.allocator;
         var parser = std.json.Parser.init(allocator, false);
@@ -307,6 +325,7 @@ const ChatWebsocketHandler = struct {
     }
 
     pub fn sendUserList(self: *ChatWebsocketHandler) !void {
+        _ = self;
         const t = std.time.milliTimestamp();
         for (chat_handlers.items) |handler| {
             const stream = &handler.stream.?;
@@ -329,6 +348,7 @@ const ChatWebsocketHandler = struct {
     }
 
     pub fn sendMessage(self: *ChatWebsocketHandler, name: []const u8, message: []const u8) !void {
+        _ = self;
         const t = std.time.milliTimestamp();
         for (chat_handlers.items) |handler| {
             const stream = &handler.stream.?;

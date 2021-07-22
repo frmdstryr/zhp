@@ -53,6 +53,8 @@ pub const Headers = struct {
         options: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
+        _ = fmt;
+        _ = options;
         try std.fmt.format(out_stream, "Headers{{", .{});
         for (self.headers.items) |header| {
             try std.fmt.format(out_stream, "\"{s}\": \"{s}\", ", .{header.key, header.value});
@@ -84,18 +86,18 @@ pub const Headers = struct {
     }
 
     pub fn contains(self: *Headers, key: []const u8) bool {
-        const v = self.lookup(key) catch |err| return false;
+        _ = self.lookup(key) catch { return false; };
         return true;
     }
 
     // Check if the header equals the other
     pub fn eql(self: *Headers, key: []const u8, other: []const u8) bool {
-        const v = self.get(key) catch |err| return false;
+        const v = self.get(key) catch { return false; };
         return mem.eql(u8, v, other);
     }
 
     pub fn eqlIgnoreCase(self: *Headers, key: []const u8, other: []const u8) bool {
-        const v = self.get(key) catch |err| return false;
+        const v = self.get(key) catch { return false; };
         return ascii.eqlIgnoreCase(v, other);
     }
 
@@ -122,7 +124,7 @@ pub const Headers = struct {
 
     pub fn remove(self: *Headers, key: []const u8) !void {
         const i = try self.lookup(key); // Throw error
-        const v = self.headers.swapRemove(i);
+        _ = self.headers.swapRemove(i);
     }
 
     pub fn pop(self: *Headers, key: []const u8) ![]const u8 {

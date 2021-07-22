@@ -248,11 +248,14 @@ fn parseHeader(allocator: *Allocator, line: []const u8, params: *Headers) ![]con
 }
 
 fn collapseRfc2231Value(allocator: *Allocator, value: []const u8) ![]const u8 {
+    _ = allocator;
     // TODO: Implement this..
     return mem.trim(u8, value, "\"");
 }
 
 fn decodeRfc2231Params(allocator: *Allocator, params: *Headers) !void {
+    _ = allocator;
+    _ = params;
     // TODO: Implement this..
 }
 

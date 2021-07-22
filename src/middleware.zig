@@ -13,6 +13,8 @@ const ServerRequest = web.ServerRequest;
 
 pub const LoggingMiddleware = struct {
     pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
+        _ = app;
+        _ = server_request;
         const request = &server_request.request;
         const response = &server_request.response;
         log.info("{d} {s} {s} ({s}) {d}", .{
@@ -29,11 +31,13 @@ pub const SessionMiddleware = struct {
     // If you want storage use it statically
 
     pub fn processRequest(app: *Application, server_request: *ServerRequest) !void {
-
+        _ = app;
+        _ = server_request;
     }
 
     pub fn processResponse(app: *Application, server_request: *ServerRequest) !void {
-
+        _ = app;
+        _ = server_request;
     }
 };
 

@@ -65,14 +65,15 @@ const Section = struct {
 
 pub fn parse(comptime Context: type, comptime template: []const u8) []const Section {
     @setEvalBranchQuota(100000);
+    _ = Context;
 
     // Count number of sections this will probably be off
     comptime var max_sections: usize = 2;
     comptime {
         var vars = simd.split(template, "{{");
-        while (vars.next()) |i| {max_sections += 1;}
+        while (vars.next()) |i| {_ = i; max_sections += 1;}
         var blocks = simd.split(template, "{%");
-        while (blocks.next()) |i| {max_sections += 1;}
+        while (blocks.next()) |i| {_ = i; max_sections += 1;}
     }
 
     // Now parse each section
@@ -180,6 +181,7 @@ pub fn Template(comptime Context: type, comptime template: []const u8) type {
         // Render the whole template ignoring any yield statements
         pub fn render(context: Context, stream: anytype) @TypeOf(stream).Error!void {
             inline for (sections) |s, i| {
+                _ = i;
                 try s.render(context, stream);
             }
         }

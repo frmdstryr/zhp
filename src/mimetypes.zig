@@ -285,7 +285,7 @@ pub const Registry = struct {
 
     pub fn loadRegistryLinux(self: *Registry) !void {
         for (known_files) |path| {
-            var file = fs.openFileAbsolute(path, .{.read=true}) catch |err| continue;
+            var file = fs.openFileAbsolute(path, .{.read=true}) catch continue;
             // std.debug.warn("Loading {}...\n", .{path});
             try self.loadRegistryFile(file);
         }

@@ -24,7 +24,7 @@ pub fn encode(dest: []u8, source: []const u8) ![]const u8 {
             const end = i + 3;
             if (end > dest.len) return error.NoSpaceLeft;
             dest[i] = '%';
-            const n = try std.fmt.bufPrint(dest[i+1..end], "{X}", .{ch});
+            //const n = try std.fmt.bufPrint(dest[i+1..end], "{X}", .{ch});
             i = end;
         }
     }

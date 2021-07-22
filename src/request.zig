@@ -369,6 +369,7 @@ pub const Request = struct {
                     // Read port, can be at most 5 digits (65535) so we
                     // want to read at least 6 bytes to ensure we catch the /
                     inline for("012345") |i| {
+                        _ = i;
                         ch = try stream.readByteSafe();
                         if (!ascii.isDigit(ch)) break;
                     }
@@ -526,6 +527,8 @@ pub const Request = struct {
     }
 
     pub fn readChunkedBody(self: *Request, stream: *IOStream) !void {
+        _ = self;
+        _ = stream;
         return error.NotImplemented; // TODO: This
     }
 
@@ -535,6 +538,8 @@ pub const Request = struct {
         options: std.fmt.FormatOptions,
         out_stream: anytype,
     ) !void {
+        _ = fmt;
+        _ = options;
         try std.fmt.format(out_stream, "Request{{\n", .{});
         try std.fmt.format(out_stream, "  .client=\"{s}\",\n", .{self.client});
         try std.fmt.format(out_stream, "  .method={s},\n", .{self.method});

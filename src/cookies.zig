@@ -68,7 +68,7 @@ pub const Cookies = struct {
     }
 
     pub fn contains(self: *Cookies, key: []const u8) bool {
-        const v = self.lookup(key) catch |err| return false;
+        _ = self.lookup(key) catch { return false; };
         return true;
     }
 

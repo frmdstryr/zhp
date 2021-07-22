@@ -17,6 +17,8 @@ pub var default_stylesheet = @embedFile("templates/style.css");
 
 pub const IndexHandler = struct {
     pub fn get(self: *IndexHandler, request: *web.Request, response: *web.Response) !void {
+        _ = self;
+        _ = request;
         try response.stream.writeAll(
             \\No routes are defined
             \\Please add a list of routes in your main zig file.
@@ -89,6 +91,8 @@ pub const NotFoundHandler = struct {
     const template = @embedFile("templates/not-found.html");
     pub fn dispatch(self: *NotFoundHandler, request: *web.Request,
                     response: *web.Response) !void {
+        _ = self;
+        _ = request;
         response.status = responses.NOT_FOUND;
         try response.stream.print(template, .{default_stylesheet});
     }
@@ -130,7 +134,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
             const file = fs.cwd().openFile(full_path, .{.read=true}) catch |err| {
                 // TODO: Handle debug page
-                //log.warn("Static file error: {}", .{err});
+                log.warn("Static file error: {}", .{err});
                 return self.renderNotFound(request, response);
             };
             errdefer file.close();
@@ -245,6 +249,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
 
         // Get a hash of the file
         pub fn getETagHeader(self: *Self) ?[]const u8 {
+            _ = self;
             // TODO: This
             return null;
         }
@@ -286,6 +291,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         }
 
         pub fn renderNotFound(self: *Self, request: *web.Request, response: *web.Response) !void {
+            _ = self;
             var handler = NotFoundHandler{};
             try handler.dispatch(request, response);
         }
@@ -360,6 +366,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
         }
 
         fn checkUpgradeHeaders(self: *Self, request: *web.Request) !void {
+            _ = self;
             if (!request.headers.eqlIgnoreCase("Upgrade", "websocket")) {
                 log.debug("Cannot only upgrade to 'websocket'", .{});
                 return error.BadRequest; // Can only upgrade to websocket
@@ -382,6 +389,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
 
         /// As a safety measure make sure the origin header matches the host header
         fn checkOrigin(self: *Self, request: *web.Request) bool {
+            _ = self;
             if (@hasDecl(Protocol, "checkOrigin")) {
                 return Protocol.checkOrigin(request);
             } else {
@@ -402,6 +410,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
         }
 
         fn getWebsocketVersion(self: *Self, request: *web.Request) !u8 {
+            _ = self;
             const v = request.headers.getDefault("Sec-WebSocket-Version", "");
             return std.fmt.parseInt(u8, v, 10) catch error.BadRequest;
         }
@@ -451,6 +460,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
         }
 
         fn processStream(self: *Self, protocol: *Protocol) !void {
+            _ = self;
             const ws = &protocol.websocket;
             while (true) {
                 const dataframe = try ws.readDataFrame();

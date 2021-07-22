@@ -546,6 +546,8 @@ const RegexParser = struct {
     }
 
     fn charClassMinLen(comptime class: u21, comptime encoding: Encoding) usize {
+        _ = class;
+        _ = encoding;
         return 1;
     }
 
@@ -598,7 +600,7 @@ const RegexParser = struct {
             return switch (self) {
                 .grouped => |grouped| grouped.minLen(encoding),
                 .brackets => |brackets| brackets.minLen(encoding),
-                .any => |brackets| 1,
+                .any => 1,
                 .char_class => |class| charClassMinLen(class, encoding),
                 .literal => |codepoint_str| block: {
                     var len: usize = 0;
@@ -852,7 +854,6 @@ inline fn matchSubExpr(comptime sub_expr: RegexParser.SubExpr, comptime options:
                         }
                     } else {
                         // TODO Using an inline while here crashes the compiler in codegen
-                        var curr_additional_rep: usize = 0;
                         while (curr_rep < range.max) : (curr_rep += 1) {
                             if (try matchAtom(atom.data, options, str[curr_slice.len..], result)) |matched_slice| {
                                 curr_slice = str[0 .. matched_slice.len + curr_slice.len];
@@ -920,7 +921,7 @@ pub fn MatchResult(comptime regex: []const u8, comptime options: MatchOptions) t
             pub usingnamespace if (capture_len != 0)
                 struct {
                     pub fn capture(self: Self, comptime name: []const u8) ?[]const CharT {
-                        inline for (capture_names) |maybe_name, curr_idx| {
+                        inline for (Self.capture_names) |maybe_name, curr_idx| {
                             if (maybe_name) |curr_name| {
                                 if (comptime std.mem.eql(u8, name, curr_name))
                                     return self.captures[curr_idx];
