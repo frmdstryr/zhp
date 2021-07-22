@@ -1,9 +1,6 @@
-zig-cache/
-
-.kdev4/
-*.kate-swp
-
 callgrind.*
-
 __pycache__/
-
+zig-cache
+zig-out
+/deps.zig
+/.zigmod

@@ -4,3 +4,5 @@ main: src/zhp.zig
 license: MIT
 description: A HTTP server written in Zig.
 dependencies:
+  - src: git https://github.com/alexnask/ctregex.zig
+  - src: git https://github.com/frmdstryr/zig-datetime

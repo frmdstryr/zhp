@@ -1,5 +1,5 @@
 // Run with
-// zig run --pkg-begin zhp src/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
+// zig run --pkg-begin zhp src/zhp.zig --pkg-begin ctregex src/bundled_depends/ctregex/ctregex.zig --pkg-end --pkg-begin datetime src/bundled_depends/datetime/datetime.zig --pkg-end --pkg-end -OReleaseSafe tests/parser.zig
 //
 const std = @import("std");
 const net = std.net;
