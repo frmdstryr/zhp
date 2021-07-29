@@ -281,6 +281,7 @@ const ChatWebsocketHandler = struct {
     username: []const u8 = "",
 
     pub fn selectProtocol(req: *Request, resp: *Response) !void {
+        _ = req;
         try resp.headers.append("Sec-WebSocket-Protocol", "json");
     }
 

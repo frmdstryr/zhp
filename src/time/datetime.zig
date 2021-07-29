@@ -18,8 +18,8 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 // Number of days in each month not accounting for leap year
-pub const Weekday = enum {
-    Monday,
+pub const Weekday = enum(u3) {
+    Monday = 1,
     Tuesday,
     Wednesday,
     Thursday,
@@ -28,8 +28,8 @@ pub const Weekday = enum {
     Sunday,
 };
 
-pub const Month = enum {
-    January,
+pub const Month = enum(u4) {
+    January = 1,
     February,
     March,
     April,

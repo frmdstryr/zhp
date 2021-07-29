@@ -368,8 +368,7 @@ pub const Request = struct {
                 if (ch == ':') {
                     // Read port, can be at most 5 digits (65535) so we
                     // want to read at least 6 bytes to ensure we catch the /
-                    inline for("012345") |i| {
-                        _ = i;
+                    inline for("012345") |_| {
                         ch = try stream.readByteSafe();
                         if (!ascii.isDigit(ch)) break;
                     }
