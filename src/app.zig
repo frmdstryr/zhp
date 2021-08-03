@@ -578,6 +578,8 @@ pub const Application = struct {
         header_timeout: u32 = 300 * time.ms_per_s,  // 5 min
         body_timeout: u32 = 900 * time.ms_per_s, // 15 min
 
+        // Set tcp TCP_NODELAY
+        tcp_nodelay: bool = true,
 
         // List of trusted downstream (ie proxy) servers
         trust_x_headers: bool = true,
@@ -638,6 +640,15 @@ pub const Application = struct {
     pub fn listen(self: *Application, address: []const u8, port: u16) !void {
         const addr = try net.Address.parseIp4(address, port);
         try self.server.listen(addr);
+        if (@hasDecl(os, "TCP_NODELAY") and self.options.tcp_nodelay) {
+            const SOL_TCP = 6;
+            try os.setsockopt(
+                self.server.sockfd.?,
+                SOL_TCP,
+                os.TCP_NODELAY,
+                &std.mem.toBytes(@as(c_int, 1)),
+            );
+        }
         log.info("Listening on http://{s}:{d}", .{address, port});
     }
 
