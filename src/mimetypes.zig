@@ -310,7 +310,7 @@ pub const Registry = struct {
             // Empty or no spaces
             if (line.len == 0 or mem.indexOf(u8, line, " ") == null) continue;
 
-            var it = mem.tokenize(line, " ");
+            var it = mem.tokenize(u8, line, " ");
             const mime_type = it.next() orelse continue;
             while (it.next()) |ext| {
                 try self.addType(ext, mime_type);
