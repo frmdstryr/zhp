@@ -30,7 +30,7 @@ pub const Cookies = struct {
 
     // Parse up to capacity cookies
     pub fn parse(self: *Cookies, header: []const u8) !void {
-        var it = simd.split(header, "; ");
+        var it = simd.split(u8, header, "; ");
         defer self.parsed = true;
         while (self.cookies.items.len < self.cookies.capacity) {
             const pair = it.next() orelse break;

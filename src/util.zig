@@ -4,6 +4,7 @@
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
 const std = @import("std");
+const builtin = @import("builtin");
 const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
@@ -12,7 +13,7 @@ const Stream = std.net.Stream;
 const assert = std.debug.assert;
 
 pub const Bytes = std.ArrayList(u8);
-pub const native_endian = std.builtin.target.cpu.arch.endian();
+pub const native_endian = builtin.target.cpu.arch.endian();
 
 
 pub inline fn isCtrlChar(ch: u8) bool {

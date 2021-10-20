@@ -660,11 +660,11 @@ pub const Application = struct {
 
         // Ignore sigpipe
         var act = os.Sigaction{
-            .handler = .{.sigaction = os.SIG_IGN },
+            .handler = .{.sigaction = os.SIG.IGN },
             .mask = os.empty_sigset,
             .flags = 0,
         };
-        os.sigaction(os.SIGPIPE, &act, null);
+        os.sigaction(os.SIG.PIPE, &act, null);
 
         Application.instance = self;
         self.running = true;

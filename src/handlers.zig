@@ -173,11 +173,11 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
                 // the request will be treated as if the header didn't exist.
                 // response.status = responses.PARTIAL_CONTENT;
                 if (range_header.len > 8 and mem.startsWith(u8, range_header, "bytes=")) {
-                    var it = mem.split(range_header[6..], ",");
+                    var it = mem.split(u8, range_header[6..], ",");
 
                     // Only support the first range
                     const range = mem.trim(u8, it.next().?, " ");
-                    var tokens = mem.split(range, "-");
+                    var tokens = mem.split(u8, range, "-");
                     var range_end: ?[]const u8 = null;
 
                     if (range[0] == '-') {
@@ -375,7 +375,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
             // Some proxies/load balancers will mess with the connection header
             // and browsers also send multiple values here
             const header = request.headers.getDefault("Connection", "");
-            var it = std.mem.split(header, ",");
+            var it = std.mem.split(u8, header, ",");
             while (it.next()) |part| {
                 const conn = std.mem.trim(u8, part, " ");
                 if (ascii.eqlIgnoreCase(conn, "upgrade")) {

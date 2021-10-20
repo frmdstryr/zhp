@@ -70,9 +70,9 @@ pub fn parse(comptime Context: type, comptime template: []const u8) []const Sect
     // Count number of sections this will probably be off
     comptime var max_sections: usize = 2;
     comptime {
-        var vars = simd.split(template, "{{");
+        var vars = simd.split(u8, template, "{{");
         while (vars.next()) |i| {_ = i; max_sections += 1;}
-        var blocks = simd.split(template, "{%");
+        var blocks = simd.split(u8, template, "{%");
         while (blocks.next()) |i| {_ = i; max_sections += 1;}
     }
 

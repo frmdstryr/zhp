@@ -122,33 +122,37 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
     return null; // Not found
 }
 
-pub fn split(buffer: []const u8, delimiter: []const u8) SplitIterator {
-    return SplitIterator{.buffer=buffer, .delimiter=delimiter};
+pub fn split(comptime T: type, buffer: []const T, delimiter: []const T) SplitIterator(T) {
+    const Iterator = SplitIterator(T);
+    return Iterator{.buffer=buffer, .delimiter=delimiter};
 }
 
-pub const SplitIterator = struct {
-        index: ?usize = 0,
-        buffer: []const u8,
-        delimiter: []const u8,
+pub fn SplitIterator(comptime T: type) type {
+    return struct {
+        const Self = @This();
+            index: ?usize = 0,
+            buffer: []const T,
+            delimiter: []const T,
 
-    /// Returns a slice of the next field, or null if splitting is complete.
-    pub fn next(self: *SplitIterator) ?[]const u8 {
-        const start = self.index orelse return null;
-        const end = if (indexOfPos(u8, self.buffer, start, self.delimiter)) |delim_start| blk: {
-            self.index = delim_start + self.delimiter.len;
-            break :blk delim_start;
-        } else blk: {
-            self.index = null;
-            break :blk self.buffer.len;
-        };
-        return self.buffer[start..end];
-    }
+        /// Returns a slice of the next field, or null if splitting is complete.
+        pub fn next(self: *Self) ?[]const T {
+            const start = self.index orelse return null;
+            const end = if (indexOfPos(T, self.buffer, start, self.delimiter)) |delim_start| blk: {
+                self.index = delim_start + self.delimiter.len;
+                break :blk delim_start;
+            } else blk: {
+                self.index = null;
+                break :blk self.buffer.len;
+            };
+            return self.buffer[start..end];
+        }
 
-    /// Returns a slice of the remaining bytes. Does not affect iterator state.
-    pub fn rest(self: SplitIterator) []const u8 {
-        const end = self.buffer.len;
-        const start = self.index orelse end;
-        return self.buffer[start..end];
-    }
+        /// Returns a slice of the remaining bytes. Does not affect iterator state.
+        pub fn rest(self: Self) []const T {
+            const end = self.buffer.len;
+            const start = self.index orelse end;
+            return self.buffer[start..end];
+        }
 
-};
+    };
+}

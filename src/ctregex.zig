@@ -467,7 +467,7 @@ const RegexParser = struct {
                     break :block char;
                 }
                 parser.raiseError("Invalid character '{}' after escape \\", .{parser.peek()});
-            } else parser.consumeNotOneOf(special_brackets) orelse parser.raiseError("Expected a valid character after - in bracket rule, got character '{}'", .{c});
+            } else parser.consumeNotOneOf(special_brackets) orelse parser.raiseError("Expected a valid character after - in bracket rule, got character '{}'", .{parser.peek()});
 
             if (first_char >= second_char) {
                 parser.raiseError("Invalid range '{}-{}', start should be smaller than end", .{ first_char, second_char });

@@ -5,8 +5,9 @@
 // -------------------------------------------------------------------------- //
 const std = @import("std");
 const web = @import("zhp.zig");
+const builtin = @import("builtin");
 const log = std.log;
-const native_endian = std.builtin.target.cpu.arch.endian();
+const native_endian = builtin.target.cpu.arch.endian();
 
 pub const Opcode = enum(u4) {
     Continue = 0x0,

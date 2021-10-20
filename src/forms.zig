@@ -69,7 +69,7 @@ pub const Form = struct {
     }
 
     pub fn parseMultipart(self: *Form, content_type: []const u8, data: []const u8) !void {
-        var iter = mem.split(content_type, ";");
+        var iter = mem.split(u8, content_type, ";");
         while (iter.next()) |part| {
             const pair = mem.trim(u8, part, WS);
             const key = "boundary=";
@@ -101,7 +101,7 @@ pub const Form = struct {
 
         const separator = try std.fmt.bufPrint(&buf, "--{s}\r\n", .{bounds});
 
-        var fields = simd.split(data[0..final_boundary_index.?], separator);
+        var fields = simd.split(u8, data[0..final_boundary_index.?], separator);
 
         // TODO: Make these default capacities configurable
         var headers = try Headers.initCapacity(self.allocator, 8);
@@ -227,7 +227,7 @@ test "multi-file-form" {
 // return the first value and update the params with everything else
 fn parseHeader(allocator: *Allocator, line: []const u8, params: *Headers) ![]const u8 {
     if (line.len == 0) return "";
-    var it = mem.split(line, ";");
+    var it = mem.split(u8, line, ";");
 
     // First part is returned as the main header value
     const value = if (it.next()) |p| mem.trim(u8, p, " \r\n") else "";
