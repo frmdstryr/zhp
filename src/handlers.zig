@@ -70,8 +70,9 @@ pub const ServerErrorHandler = struct {
         } else {
             if (@errorReturnTrace()) |trace| {
                 const stderr = std.io.getStdErr().writer();
-                const held = std.debug.getStderrMutex().acquire();
-                defer held.release();
+                const held = std.debug.getStderrMutex();
+                held.lock();
+                defer held.unlock();
 
                 try std.debug.writeStackTrace(
                     trace.*,
