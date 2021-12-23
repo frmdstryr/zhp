@@ -49,7 +49,7 @@ const HelloHandler = struct {
 /// it to invoke the stream method to complete the response.
 const StreamHandler = struct {
     const template = @embedFile("templates/stream.html");
-    allocator: ?*std.mem.Allocator = null,
+    allocator: ?std.mem.Allocator = null,
 
     pub fn get(self: *StreamHandler, req: *Request, resp: *Response) !void {
         if (std.mem.eql(u8, req.path, "/stream/live/")) {
@@ -274,7 +274,7 @@ const ChatHandler = struct {
 /// Demonstrates the useage of the websocket protocol
 const ChatWebsocketHandler = struct {
     var client_id = std.atomic.Atomic(usize).init(0);
-    var chat_handlers = std.ArrayList(*ChatWebsocketHandler).init(&gpa.allocator);
+    var chat_handlers = std.ArrayList(*ChatWebsocketHandler).init(gpa.allocator());
 
     websocket: web.Websocket,
     stream: ?web.websocket.Writer(1024, .Text) = null,
@@ -320,7 +320,7 @@ const ChatWebsocketHandler = struct {
         if (std.mem.eql(u8, t, "message")) {
             try self.sendMessage(self.username, msg.get("text").?.String);
         } else if (std.mem.eql(u8, t, "username")) {
-            self.username = try std.mem.dupe(allocator, u8, msg.get("name").?.String);
+            self.username = try allocator.dupe(u8, msg.get("name").?.String);
             try self.sendUserList();
         }
     }
@@ -403,13 +403,13 @@ pub const routes = [_]web.Route{
 
 
 pub const middleware = [_]web.Middleware{
-    web.Middleware.create(web.middleware.LoggingMiddleware),
+    //web.Middleware.create(web.middleware.LoggingMiddleware),
     //web.Middleware.create(web.middleware.SessionMiddleware),
 };
 
 pub fn main() !void {
     defer std.debug.assert(!gpa.deinit());
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
 
     var app = web.Application.init(allocator, .{.debug=true});
 

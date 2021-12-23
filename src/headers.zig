@@ -31,13 +31,13 @@ pub const Headers = struct {
     pub const HeaderList = std.ArrayList(Header);
     headers: HeaderList,
 
-    pub fn init(allocator: *Allocator) Headers {
+    pub fn init(allocator: Allocator) Headers {
         return Headers{
             .headers = HeaderList.init(allocator),
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, num: usize) !Headers {
+    pub fn initCapacity(allocator: Allocator, num: usize) !Headers {
         return Headers{
             .headers = try HeaderList.initCapacity(allocator, num),
         };
@@ -231,7 +231,7 @@ pub const Headers = struct {
         fba.end_index = data.len; // Ensure we don't modify the buffer
 
         // Don't deinit since we don't actually own the data
-        var buf = Bytes.fromOwnedSlice(&fba.allocator, fba.buffer);
+        var buf = Bytes.fromOwnedSlice(fba.allocator(), fba.buffer);
         var stream = IOStream.fromBuffer(fba.buffer);
         try self.parse(&buf, &stream, max_size);
     }

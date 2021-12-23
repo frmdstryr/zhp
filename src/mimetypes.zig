@@ -219,7 +219,7 @@ pub const Registry = struct {
     // Maps mime type to list of extensions
     type_map_inv: StringArrayMap,
 
-    pub fn init(allocator: *Allocator) Registry {
+    pub fn init(allocator: Allocator) Registry {
         // Must call load separately to avoid https://github.com/ziglang/zig/issues/2765
         return Registry{
             .arena = std.heap.ArenaAllocator.init(allocator),
@@ -232,23 +232,23 @@ pub const Registry = struct {
     // this copies both and will overwrite any existing entries
     pub fn addType(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
         // Add '.' if necessary
-        const allocator = &self.arena.allocator;
+        const allocator = self.arena.allocator();
         const extension =
             if (mem.startsWith(u8, ext, "."))
-                try mem.dupe(allocator, u8, mem.trim(u8, ext, WS))
+                try allocator.dupe(u8, mem.trim(u8, ext, WS))
             else
                 try mem.concat(allocator, u8,
                     &[_][]const u8{".", mem.trim(u8, ext, WS)});
         return self.addTypeInternal(
             extension,
-            try mem.dupe(allocator, u8, mem.trim(u8, mime_type, WS)));
+            try allocator.dupe(u8, mem.trim(u8, mime_type, WS)));
     }
 
     // Add a mapping between a type and an extension.
     // this assumes the entries added are already owend
     fn addTypeInternal(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
         // std.debug.warn("  adding {}: {} to registry...\n", .{ext, mime_type});
-        const allocator = &self.arena.allocator;
+        const allocator = self.arena.allocator();
         _ = try self.type_map.put(ext, mime_type);
 
         if (self.type_map_inv.getEntry(mime_type)) |entry| {

@@ -107,7 +107,7 @@ pub const ServerRequest = struct {
         Start,
         Finish
     };
-    allocator: *Allocator,
+    allocator: Allocator,
     application: *Application,
 
     // Storage the fixed buffer allocator used for each request handler
@@ -126,7 +126,7 @@ pub const ServerRequest = struct {
     // Request parse error or some handler error
     err: ?anyerror = null,
 
-    pub fn init(allocator: *Allocator, app: *Application) !ServerRequest {
+    pub fn init(allocator: Allocator, app: *Application) !ServerRequest {
         return ServerRequest{
             .allocator = allocator,
             .application = app,
@@ -152,7 +152,7 @@ pub const ServerRequest = struct {
         self.response.prepare();
 
         // Replace the allocator so request handlers have limited memory
-        self.response.allocator = &self.buffer.allocator;
+        self.response.allocator = self.buffer.allocator();
     }
 
     // Reset so it can be reused
@@ -196,7 +196,7 @@ pub const ServerConnection = struct {
     // Outstanding requests
     //requests: RequestList,
 
-    pub fn init(allocator: *Allocator, app: *Application) !ServerConnection {
+    pub fn init(allocator: Allocator, app: *Application) !ServerConnection {
         return ServerConnection{
             .application = app,
             .io = try IOStream.initCapacity(allocator, null, 0, mem.page_size),
@@ -615,7 +615,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Server setup
     // ------------------------------------------------------------------------
-    allocator: *Allocator,
+    allocator: Allocator,
     server: net.StreamServer,
     connection_pool: ConnectionPool,
     request_pool: RequestPool,
@@ -626,7 +626,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Setup
     // ------------------------------------------------------------------------
-    pub fn init(allocator: *Allocator, options: Options,) Application {
+    pub fn init(allocator: Allocator, options: Options,) Application {
         mimetypes.instance = mimetypes.Registry.init(allocator);
         return Application{
             .allocator = allocator,

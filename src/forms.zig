@@ -32,11 +32,11 @@ const WS = " \t\r\n";
 
 
 pub const Form = struct {
-    allocator: *Allocator,
+    allocator: Allocator,
     fields: ArgMap,
     files: FileMap,
 
-    pub fn init(allocator: *Allocator) Form {
+    pub fn init(allocator: Allocator) Form {
         return Form{
             .allocator = allocator,
             .fields = ArgMap.init(allocator),
@@ -225,7 +225,7 @@ test "multi-file-form" {
 
 // Parse a header.
 // return the first value and update the params with everything else
-fn parseHeader(allocator: *Allocator, line: []const u8, params: *Headers) ![]const u8 {
+fn parseHeader(allocator: Allocator, line: []const u8, params: *Headers) ![]const u8 {
     if (line.len == 0) return "";
     var it = mem.split(u8, line, ";");
 
@@ -247,13 +247,13 @@ fn parseHeader(allocator: *Allocator, line: []const u8, params: *Headers) ![]con
     return value;
 }
 
-fn collapseRfc2231Value(allocator: *Allocator, value: []const u8) ![]const u8 {
+fn collapseRfc2231Value(allocator: Allocator, value: []const u8) ![]const u8 {
     _ = allocator;
     // TODO: Implement this..
     return mem.trim(u8, value, "\"");
 }
 
-fn decodeRfc2231Params(allocator: *Allocator, params: *Headers) !void {
+fn decodeRfc2231Params(allocator: Allocator, params: *Headers) !void {
     _ = allocator;
     _ = params;
     // TODO: Implement this..
@@ -272,16 +272,16 @@ test "parse-content-disposition-header" {
 
 /// Inverse of parseHeader.
 /// This always returns a copy so it must be cleaned up!
-pub fn encodeHeader(allocator: *Allocator, key: []const u8, params: Headers) ![]const u8 {
+pub fn encodeHeader(allocator: Allocator, key: []const u8, params: Headers) ![]const u8 {
     if (params.headers.items.len == 0) {
-        return try mem.dupe(allocator, u8, key);
+        return try allocator.dupe(u8, key);
     }
 
     // I'm lazy
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var out = std.ArrayList([]const u8).init(&arena.allocator);
+    var out = std.ArrayList([]const u8).init(arena.allocator());
     try out.append(key);
 
     // Sort the parameters just to make it easy to test.

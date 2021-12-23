@@ -163,7 +163,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-    pub fn initCapacity(allocator: *Allocator,
+    pub fn initCapacity(allocator: Allocator,
                         buffer_size: usize,
                         max_headers: usize,
                         max_cookies: usize) !Request {
@@ -177,7 +177,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Testing
     // ------------------------------------------------------------------------
-    pub fn initTest(allocator: *Allocator, stream: *IOStream) !Request {
+    pub fn initTest(allocator: Allocator, stream: *IOStream) !Request {
         //if (!builtin.is_test) @compileError("This is for testing only");
         return Request{
             .buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer),
