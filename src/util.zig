@@ -523,8 +523,16 @@ pub const IOStream = struct {
 
 };
 
+const DummyHeldLock = struct {
+    mutex: *std.Thread.Mutex,
+    pub fn release(self: DummyHeldLock) void {
+        self.mutex.unlock();
+    }
+};
+
 // The event based lock doesn't work without evented io
 pub const Lock = if (std.io.is_async) std.event.Lock else std.Thread.Mutex;
+pub const HeldLock = if (std.io.is_async) std.event.Lock.Held else DummyHeldLock;
 
 pub fn ObjectPool(comptime T: type) type {
     return struct {
@@ -577,12 +585,13 @@ pub fn ObjectPool(comptime T: type) type {
             self.free_objects.deinit();
         }
 
-        pub fn lock(self: *Self) void {
-            self.mutex.lock();
-        }
-
-        pub fn unlock(self: *Self) void {
-            self.mutex.unlock();
+        pub fn acquire(self: *Self) HeldLock {
+            if (std.io.is_async) {
+                return self.mutex.acquire();
+            } else {
+                self.mutex.lock();
+                return DummyHeldLock{.mutex=&self.mutex};
+            }
         }
 
     };
