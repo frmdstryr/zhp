@@ -503,7 +503,7 @@ pub const IOStream = struct {
 //         const in_stream = &self.in_stream;
 //         const out_stream = &self.out_stream ;
 //         if (in_stream.handle != 0) in_stream.close();
-//         std.debug.warn("Close in={} out={}\n", .{in_stream, out_stream});
+//         std.log.warn("Close in={} out={}\n", .{in_stream, out_stream});
 //         if (in_stream.handle != out_stream.handle and out_stream.handle != 0) {
 //             out_stream.close();
 //         }
@@ -539,7 +539,7 @@ pub fn ObjectPool(comptime T: type) type {
         free_objects: ObjectList,
 
         // Lock to use if using threads
-        lock: Lock = Lock{},
+        mutex: Lock = Lock{},
 
         pub fn init(allocator: Allocator) Self {
             return Self{
@@ -575,6 +575,14 @@ pub fn ObjectPool(comptime T: type) type {
             }
             self.objects.deinit();
             self.free_objects.deinit();
+        }
+
+        pub fn lock(self: *Self) void {
+            self.mutex.lock();
+        }
+
+        pub fn unlock(self: *Self) void {
+            self.mutex.unlock();
         }
 
     };

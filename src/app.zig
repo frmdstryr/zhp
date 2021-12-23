@@ -169,8 +169,8 @@ pub const ServerRequest = struct {
     pub fn release(self: *ServerRequest) void {
         self.stream = null;
         const app = self.application;
-        const lock = app.request_pool.lock.acquire();
-        defer lock.release();
+        app.request_pool.lock();
+        defer app.request_pool.unlock();
         app.request_pool.release(self);
     }
 
@@ -227,8 +227,8 @@ pub const ServerConnection = struct {
         // pipelining but it currently makes it slower
         var server_request: *ServerRequest = undefined;
         {
-            const lock = app.request_pool.lock.acquire();
-            defer lock.release();
+            app.request_pool.lock();
+            defer app.request_pool.unlock();
 
             if (app.request_pool.get()) |c| {
                 server_request = c;
@@ -432,8 +432,8 @@ pub const ServerConnection = struct {
 
     pub fn release(self: *ServerConnection) void {
         const app = self.application;
-        const lock = app.connection_pool.lock.acquire();
-        defer lock.release();
+        app.connection_pool.lock();
+        defer app.connection_pool.unlock();
         app.connection_pool.release(self);
     }
 
@@ -686,16 +686,16 @@ pub const Application = struct {
 
         while (self.running) {
             // Grab a frame
-            const lock = self.connection_pool.lock.acquire();
-                var server_conn: *ServerConnection = undefined;
-                if (self.connection_pool.get()) |c| {
-                    server_conn = c;
-                } else {
-                    server_conn = try self.connection_pool.create();
-                    server_conn.* = try ServerConnection.init(self.allocator, self);
-                    //server_conn.server_request.prepare();
+            self.connection_pool.lock();
+            var server_conn: *ServerConnection = undefined;
+            if (self.connection_pool.get()) |c| {
+                server_conn = c;
+            } else {
+                server_conn = try self.connection_pool.create();
+                server_conn.* = try ServerConnection.init(self.allocator, self);
+                //server_conn.server_request.prepare();
             }
-            lock.release();
+            self.connection_lock.unlock();
 
             const conn = try self.server.accept();
             //log.debug("Accepted {s}", .{conn});
@@ -734,7 +734,7 @@ pub const Application = struct {
         const path = server_request.request.path;
         inline for (routes) |*route| {
             if (try regex.match(route.pattern, .{.encoding=.ascii}, path)) |*match| {
-                //std.debug.warn("Route: name={s} path={s}\n", .{route.name, request.path});
+                //std.log.warn("Route: name={s} path={s}\n", .{route.name, request.path});
                 if (match.captures.len > 0) {
                     server_request.request.args = match.captures[0..];
                 }
@@ -771,8 +771,8 @@ pub const Application = struct {
             time.sleep(1*time.ns_per_s);
             self.clock.update();
             {
-                var lock = self.connection_pool.lock.acquire();
-                defer lock.release();
+                self.connection_pool.lock();
+                defer self.connection_pool.unlock();
                 if (self.connection_pool.free_objects.popOrNull()) |conn| {
                     conn.deinit();
                     self.connection_pool.allocator.destroy(conn);
@@ -780,8 +780,8 @@ pub const Application = struct {
             }
 
             {
-                var lock = self.request_pool.lock.acquire();
-                defer lock.release();
+                self.request_pool.lock();
+                defer self.request_pool.release();
                 if (self.request_pool.free_objects.popOrNull()) |req| {
                     req.deinit();
                     self.request_pool.allocator.destroy(req);

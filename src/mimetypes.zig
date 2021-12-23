@@ -247,7 +247,7 @@ pub const Registry = struct {
     // Add a mapping between a type and an extension.
     // this assumes the entries added are already owend
     fn addTypeInternal(self: *Registry, ext: []const u8, mime_type: []const u8) !void {
-        // std.debug.warn("  adding {}: {} to registry...\n", .{ext, mime_type});
+        // std.log.warn("  adding {}: {} to registry...\n", .{ext, mime_type});
         const allocator = self.arena.allocator();
         _ = try self.type_map.put(ext, mime_type);
 
@@ -286,7 +286,7 @@ pub const Registry = struct {
     pub fn loadRegistryLinux(self: *Registry) !void {
         for (known_files) |path| {
             var file = fs.openFileAbsolute(path, .{.read=true}) catch continue;
-            // std.debug.warn("Loading {}...\n", .{path});
+            // std.log.warn("Loading {}...\n", .{path});
             try self.loadRegistryFile(file);
         }
     }

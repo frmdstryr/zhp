@@ -10,7 +10,7 @@ const web = @import("zhp");
 pub const io_mode = .evented;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = &gpa.allocator;
+const allocator = gpa.allocator();
 
 pub fn main() anyerror!void {
     const req_listen_addr = try net.Address.parseIp4("127.0.0.1", 9000);
@@ -21,21 +21,21 @@ pub fn main() anyerror!void {
 
     try server.listen(req_listen_addr);
 
-    std.debug.warn("Listening at {}\n", .{server.listen_address});
+    std.log.warn("Listening at {}\n", .{server.listen_address});
 
 
     while (true) {
         const conn = try server.accept();
-        std.debug.warn("Connected to {}\n", .{conn.address});
+        std.log.warn("Connected to {}\n", .{conn.address});
         var frame = async handleConn(conn);
         await frame catch |err| {
-            std.debug.warn("Disconnected {}: {}\n", .{conn.address, err});
+            std.log.warn("Disconnected {}: {}\n", .{conn.address, err});
         };
     }
 }
 
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
-    var stream = try web.IOStream.initCapacity(allocator, conn.file, 0, 4096);
+    var stream = try web.IOStream.initCapacity(allocator, conn.stream, 0, 4096);
     defer stream.deinit();
     var request = try web.Request.initCapacity(allocator, 1024*10, 32, 32);
     defer request.deinit();
@@ -49,7 +49,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
             else => return err,
         };
 
-        try conn.file.writeAll(
+        try conn.stream.writer().writeAll(
             "HTTP/1.1 200 OK\r\n" ++
             "Content-Length: 15\r\n" ++
             "Connection: keep-alive\r\n" ++

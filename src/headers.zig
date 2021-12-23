@@ -215,7 +215,7 @@ pub const Headers = struct {
                 return error.BadRequest;
             }
 
-            //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
+            //std.log.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
             self.appendAssumeCapacity(key.?, value.?);
         }
 
@@ -260,7 +260,7 @@ test "headers-put" {
     try headers.put("Cookie", "Nom;nom;nom");
     try testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
     try headers.put("COOKie", "ABC"); // Squash even if different
-    std.debug.warn("Cookie is: {s}", .{try headers.get("Cookie")});
+    std.log.warn("Cookie is: {s}", .{try headers.get("Cookie")});
     try testing.expectEqualSlices(u8, try headers.get("Cookie"), "ABC");
 }
 

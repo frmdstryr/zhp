@@ -172,9 +172,9 @@ pub fn Template(comptime Context: type, comptime template: []const u8) type {
         const Self = @This();
 
         pub fn dump() void {
-            std.debug.warn("Template (length = {d})\n", .{template.len});
+            std.log.warn("Template (length = {d})\n", .{template.len});
             inline for (sections) |s| {
-                std.debug.warn("{s} (\"{s}\")\n", .{s, template[s.start..s.end]});
+                std.log.warn("{s} (\"{s}\")\n", .{s, template[s.start..s.end]});
             }
         }
 
