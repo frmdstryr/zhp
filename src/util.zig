@@ -15,11 +15,9 @@ const assert = std.debug.assert;
 pub const Bytes = std.ArrayList(u8);
 pub const native_endian = builtin.target.cpu.arch.endian();
 
-
 pub inline fn isCtrlChar(ch: u8) bool {
     return (ch < @as(u8, 40) and ch != '\t') or ch == @as(u8, 177);
 }
-
 
 test "is-control-char" {
     try testing.expect(isCtrlChar('A') == false);
@@ -47,7 +45,7 @@ const token_map = [_]u1{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
 pub inline fn isTokenChar(ch: u8) bool {
@@ -55,7 +53,7 @@ pub inline fn isTokenChar(ch: u8) bool {
 }
 
 pub const IOStream = struct {
-    pub const invalid_stream = Stream{.handle=0};
+    pub const invalid_stream = Stream{ .handle = 0 };
     pub const Error = Stream.WriteError;
     pub const ReadError = Stream.ReadError;
     const Self = @This();
@@ -86,8 +84,7 @@ pub const IOStream = struct {
         };
     }
 
-    pub fn initCapacity(allocator: Allocator, stream: ?Stream,
-                        in_capacity: usize, out_capacity: usize) !IOStream {
+    pub fn initCapacity(allocator: Allocator, stream: ?Stream, in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
             .in_stream = if (stream) |s| s else invalid_stream,
@@ -219,19 +216,19 @@ pub const IOStream = struct {
     pub const Reader = std.io.Reader(*IOStream, Stream.ReadError, IOStream.readFn);
 
     pub fn reader(self: *Self) Reader {
-        return Reader{.context=self};
+        return Reader{ .context = self };
     }
 
     // Return the amount of bytes waiting in the input buffer
-    pub inline fn amountBuffered(self: *Self) usize {
-        return self._in_end_index-self._in_start_index;
+    pub inline fn amountBuffered(self: Self) usize {
+        return self._in_end_index - self._in_start_index;
     }
 
-    pub inline fn isEmpty(self: *Self) bool {
+    pub inline fn isEmpty(self: Self) bool {
         return self._in_end_index == self._in_start_index;
     }
 
-    pub inline fn readCount(self: *Self) usize {
+    pub inline fn readCount(self: Self) usize {
         //return self._in_count + self._in_start_index;
         return self._in_start_index;
     }
@@ -246,7 +243,7 @@ pub const IOStream = struct {
         self._in_start_index += n;
     }
 
-    pub inline fn readBuffered(self: *Self) []u8 {
+    pub inline fn readBuffered(self: Self) []u8 {
         return self.in_buffer[self._in_start_index..self._in_end_index];
     }
 
@@ -326,7 +323,6 @@ pub const IOStream = struct {
         }
     }
 
-
     // TODO: Inline is broken
     pub fn fillBuffer(self: *Self) !void {
         const n = try self.readFn(self.in_buffer);
@@ -339,8 +335,7 @@ pub const IOStream = struct {
     pub fn readByte(self: *Self) !u8 {
         if (self._in_end_index == self._in_start_index) {
             // Do a direct read into the input buffer
-            self._in_end_index = try self.readFn(
-                self.in_buffer[0..self.in_buffer.len]);
+            self._in_end_index = try self.readFn(self.in_buffer[0..self.in_buffer.len]);
             self._in_start_index = 0;
             if (self._in_end_index < 1) return error.EndOfStream;
         }
@@ -363,17 +358,13 @@ pub const IOStream = struct {
         return c;
     }
 
-    pub inline fn lastByte(self: *Self) u8 {
+    pub inline fn lastByte(self: Self) u8 {
         return self.in_buffer[self._in_start_index];
     }
 
     // Read up to limit bytes from the stream buffer until the expression
     // returns true or the limit is hit. The initial value is checked first.
-    pub fn readUntilExpr(
-            self: *Self,
-            comptime expr: fn(ch: u8) bool,
-            initial: u8,
-            limit: usize) u8 {
+    pub fn readUntilExpr(self: *Self, comptime expr: fn (ch: u8) bool, initial: u8, limit: usize) u8 {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {
@@ -399,12 +390,7 @@ pub const IOStream = struct {
     // Read up to limit bytes from the stream buffer until the expression
     // returns true or the limit is hit. The initial value is checked first.
     // If the expression returns an error abort.
-    pub fn readUntilExprValidate(
-            self: *Self,
-            comptime ErrorType: type,
-            comptime expr: fn(ch: u8) ErrorType!bool,
-            initial: u8,
-            limit: usize) !u8 {
+    pub fn readUntilExprValidate(self: *Self, comptime ErrorType: type, comptime expr: fn (ch: u8) ErrorType!bool, initial: u8, limit: usize) !u8 {
         var found = false;
         var ch: u8 = initial;
         while (!found and self.readCount() + 8 < limit) {
@@ -433,18 +419,11 @@ pub const IOStream = struct {
     pub const Writer = std.io.Writer(*IOStream, Stream.WriteError, IOStream.writeFn);
 
     pub fn writer(self: *Self) Writer {
-        return Writer{.context=self};
+        return Writer{ .context = self };
     }
 
     fn writeFn(self: *Self, bytes: []const u8) !usize {
-        if (bytes.len == 1) {
-            self.out_buffer[self._out_index] = bytes[0];
-            self._out_index += 1;
-            if (self._out_index == self.out_buffer.len) {
-                try self.flush();
-            }
-            return @as(usize, 1);
-        } else if (bytes.len >= self.out_buffer.len) {
+        if (bytes.len >= self.out_buffer.len) {
             try self.flush();
             return self.out_stream.write(bytes);
         }
@@ -500,13 +479,13 @@ pub const IOStream = struct {
         if (self.closed) return;
         self.closed = true;
         // TODO: Doesn't need closed?
-//         const in_stream = &self.in_stream;
-//         const out_stream = &self.out_stream ;
-//         if (in_stream.handle != 0) in_stream.close();
-//         std.log.warn("Close in={} out={}\n", .{in_stream, out_stream});
-//         if (in_stream.handle != out_stream.handle and out_stream.handle != 0) {
-//             out_stream.close();
-//         }
+        //         const in_stream = &self.in_stream;
+        //         const out_stream = &self.out_stream ;
+        //         if (in_stream.handle != 0) in_stream.close();
+        //         std.log.warn("Close in={} out={}\n", .{in_stream, out_stream});
+        //         if (in_stream.handle != out_stream.handle and out_stream.handle != 0) {
+        //             out_stream.close();
+        //         }
     }
 
     pub fn deinit(self: *Self) void {
@@ -520,7 +499,6 @@ pub const IOStream = struct {
             allocator.free(self.out_buffer);
         }
     }
-
 };
 
 const DummyHeldLock = struct {
@@ -590,13 +568,11 @@ pub fn ObjectPool(comptime T: type) type {
                 return self.mutex.acquire();
             } else {
                 self.mutex.lock();
-                return DummyHeldLock{.mutex=&self.mutex};
+                return DummyHeldLock{ .mutex = &self.mutex };
             }
         }
-
     };
 }
-
 
 test "object-pool" {
     const Point = struct {
@@ -610,7 +586,7 @@ test "object-pool" {
     try testing.expect(pool.get() == null);
 
     // Create
-    var test_point = Point{.x=10, .y=3};
+    var test_point = Point{ .x = 10, .y = 3 };
     const pt = try pool.create();
     pt.* = test_point;
 
@@ -623,7 +599,6 @@ test "object-pool" {
     // Should get the same thing back
     try testing.expectEqual(pool.get().?.*, test_point);
 }
-
 
 // An unmanaged map of arrays
 pub fn StringArrayMap(comptime T: type) type {
@@ -690,8 +665,6 @@ pub fn StringArrayMap(comptime T: type) type {
     };
 }
 
-
-
 test "string-array-map" {
     const Map = StringArrayMap([]const u8);
     var map = Map.init(std.testing.allocator);
@@ -702,5 +675,4 @@ test "string-array-map" {
     const query = map.getArray("query").?;
     try testing.expect(query.items.len == 3);
     try testing.expect(mem.eql(u8, query.items[0], "a"));
-
 }

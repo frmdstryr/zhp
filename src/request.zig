@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------- //
-// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Copyright (c) 2019-2022, Jairus Martin.                                    //
 // Distributed under the terms of the MIT License.                            //
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
@@ -22,20 +22,19 @@ const IOStream = util.IOStream;
 
 const simd = @import("simd.zig");
 
-const GET_ = @bitCast(u32, [4]u8{'G', 'E', 'T', ' '});
-const PUT_ = @bitCast(u32, [4]u8{'P', 'U', 'T', ' '});
-const POST = @bitCast(u32, [4]u8{'P', 'O', 'S', 'T'});
-const HEAD = @bitCast(u32, [4]u8{'H', 'E', 'A', 'D'});
-const PATC = @bitCast(u32, [4]u8{'P', 'A', 'T', 'C'});
-const DELE = @bitCast(u32, [4]u8{'D', 'E', 'L', 'E'});
-const OPTI = @bitCast(u32, [4]u8{'O', 'P', 'T', 'I'});
-const ONS_ = @bitCast(u32, [4]u8{'O', 'N', 'S', '_'});
-const HTTP = @bitCast(u32, [4]u8{'H', 'T', 'T', 'P'});
-const V1p1 = @bitCast(u32, [4]u8{'/', '1', '.', '1'});
-const V1p0 = @bitCast(u32, [4]u8{'/', '1', '.', '0'});
-const V2p0 = @bitCast(u32, [4]u8{'/', '2', '.', '0'});
-const V3p0 = @bitCast(u32, [4]u8{'/', '3', '.', '0'});
-
+const GET_ = @bitCast(u32, [4]u8{ 'G', 'E', 'T', ' ' });
+const PUT_ = @bitCast(u32, [4]u8{ 'P', 'U', 'T', ' ' });
+const POST = @bitCast(u32, [4]u8{ 'P', 'O', 'S', 'T' });
+const HEAD = @bitCast(u32, [4]u8{ 'H', 'E', 'A', 'D' });
+const PATC = @bitCast(u32, [4]u8{ 'P', 'A', 'T', 'C' });
+const DELE = @bitCast(u32, [4]u8{ 'D', 'E', 'L', 'E' });
+const OPTI = @bitCast(u32, [4]u8{ 'O', 'P', 'T', 'I' });
+const ONS_ = @bitCast(u32, [4]u8{ 'O', 'N', 'S', '_' });
+const HTTP = @bitCast(u32, [4]u8{ 'H', 'T', 'T', 'P' });
+const V1p1 = @bitCast(u32, [4]u8{ '/', '1', '.', '1' });
+const V1p0 = @bitCast(u32, [4]u8{ '/', '1', '.', '0' });
+const V2p0 = @bitCast(u32, [4]u8{ '/', '2', '.', '0' });
+const V3p0 = @bitCast(u32, [4]u8{ '/', '3', '.', '0' });
 
 fn skipGraphFindSpaceOrQuestionMark(ch: u8) !bool {
     if (!ascii.isGraph(ch)) {
@@ -55,7 +54,6 @@ fn skipHostChar(ch: u8) bool {
     return !ascii.isAlNum(ch) and !(ch == '.' or ch == '-');
 }
 
-
 pub const Request = struct {
     pub const Content = struct {
         pub const StorageType = enum {
@@ -74,10 +72,10 @@ pub const Request = struct {
         max_request_line_size: usize = 2048,
 
         // If the whole request header is larger than this throw an error
-        max_header_size: usize = 10*1024,
+        max_header_size: usize = 10 * 1024,
 
         // If the content length is larger than this throw an error
-        max_content_length: usize = 1000*1024*1024,
+        max_content_length: usize = 1000 * 1024 * 1024,
 
         // Dump conents of the request buffer
         dump_buffer: bool = false,
@@ -139,7 +137,7 @@ pub const Request = struct {
     read_finished: bool = false,
 
     // Url captures
-    args: ?[]?[]const u8 = null,
+    args: ?[]const ?[]const u8 = null,
 
     // All headers
     headers: Headers,
@@ -163,10 +161,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-    pub fn initCapacity(allocator: Allocator,
-                        buffer_size: usize,
-                        max_headers: usize,
-                        max_cookies: usize) !Request {
+    pub fn initCapacity(allocator: Allocator, buffer_size: usize, max_headers: usize, max_cookies: usize) !Request {
         return Request{
             .buffer = try Bytes.initCapacity(allocator, buffer_size),
             .headers = try Headers.initCapacity(allocator, max_headers),
@@ -203,11 +198,11 @@ pub const Request = struct {
 
         if (options.dump_buffer) {
             std.log.debug(
-            \\
-            \\========== Buffer at {} ==========
-            \\{s}
-            \\==============================
-            , .{start, stream.readBuffered()});
+                \\
+                \\========== Buffer at {} ==========
+                \\{s}
+                \\==============================
+            , .{ start, stream.readBuffered() });
         }
 
         while (true) {
@@ -285,16 +280,13 @@ pub const Request = struct {
             POST => if (stream.readByteUnsafe() == ' ') Method.Post else Method.Unknown,
             HEAD => if (stream.readByteUnsafe() == ' ') Method.Head else Method.Unknown,
             DELE => if (stream.readByteUnsafe() == 'T' and
-                        stream.readByteUnsafe() == 'E' and
-                        stream.readByteUnsafe() == ' ') Method.Delete
-                    else Method.Unknown,
+                stream.readByteUnsafe() == 'E' and
+                stream.readByteUnsafe() == ' ') Method.Delete else Method.Unknown,
             PATC => if (stream.readByteUnsafe() == 'H' and
-                        stream.readByteUnsafe() == ' ') Method.Patch
-                    else Method.Unknown,
+                stream.readByteUnsafe() == ' ') Method.Patch else Method.Unknown,
             OPTI => blk: {
                 stream.skipBytes(4);
-                const r = if (@bitCast(u32, buf[4..8].*) != ONS_) Method.Options
-                    else Method.Unknown;
+                const r = if (@bitCast(u32, buf[4..8].*) != ONS_) Method.Options else Method.Unknown;
                 break :blk r;
             },
             else => Method.Unknown, // Unknown method or doesn't have a space
@@ -337,7 +329,7 @@ pub const Request = struct {
             '/' => {},
             'h', 'H' => {
                 // A complete URL, known as the absolute form
-                inline for("ttp") |expected| {
+                inline for ("ttp") |expected| {
                     ch = ascii.toLower(stream.readByteUnsafe());
                     if (ch != expected) return error.BadRequest;
                 }
@@ -351,7 +343,7 @@ pub const Request = struct {
                 }
                 if (ch != ':') return error.BadRequest;
 
-                inline for("//") |expected| {
+                inline for ("//") |expected| {
                     ch = stream.readByteUnsafe();
                     if (ch != expected) return error.BadRequest;
                 }
@@ -368,15 +360,14 @@ pub const Request = struct {
                 if (ch == ':') {
                     // Read port, can be at most 5 digits (65535) so we
                     // want to read at least 6 bytes to ensure we catch the /
-                    inline for("012345") |_| {
+                    inline for ("012345") |_| {
                         ch = try stream.readByteSafe();
                         if (!ascii.isDigit(ch)) break;
                     }
                 }
                 if (ch != '/') return error.BadRequest;
-                path_start = stream.readCount()-1;
+                path_start = stream.readCount() - 1;
                 self.host = buf[host_start..path_start];
-
             },
             '*' => {
                 // The asterisk form, a simple asterisk ('*') is used with
@@ -391,18 +382,16 @@ pub const Request = struct {
         }
 
         // Read path
-        ch = try stream.readUntilExprValidate(error{BadRequest},
-                skipGraphFindSpaceOrQuestionMark, ch, read_limit);
-        var end = stream.readCount()-1;
+        ch = try stream.readUntilExprValidate(error{BadRequest}, skipGraphFindSpaceOrQuestionMark, ch, read_limit);
+        var end = stream.readCount() - 1;
         self.path = buf[path_start..end];
 
         // Read query
         if (ch == '?') {
             const q = stream.readCount();
             ch = try stream.readByteSafe();
-            ch = try stream.readUntilExprValidate(error{BadRequest},
-                skipGraphFindSpace, ch, read_limit);
-            end = stream.readCount()-1;
+            ch = try stream.readUntilExprValidate(error{BadRequest}, skipGraphFindSpace, ch, read_limit);
+            end = stream.readCount() - 1;
             self.query = buf[q..end];
         }
         if (stream.readCount() >= read_limit) {
@@ -431,8 +420,7 @@ pub const Request = struct {
                 try headers.put("Content-Length", content_length[0..i]);
             }
 
-            self.content_length = std.fmt.parseInt(u32, content_length, 10)
-                catch return error.BadRequest;
+            self.content_length = std.fmt.parseInt(u32, content_length, 10) catch return error.BadRequest;
 
             if (self.content_length > max_size) {
                 return error.RequestEntityTooLarge;
@@ -477,7 +465,7 @@ pub const Request = struct {
         if (end_of_body > self.buffer.capacity) {
             std.log.warn("Write to temp file", .{});
             // TODO: Write the body to a file
-            const tmp = std.fs.cwd();//.openDir("/tmp/");
+            const tmp = std.fs.cwd(); //.openDir("/tmp/");
             var f = try tmp.atomicFile("zhp.tmp", .{});
 
             // Copy what was buffered
@@ -502,7 +490,7 @@ pub const Request = struct {
 
             self.content = Content{
                 .type = .TempFile,
-                .data = .{.file=f},
+                .data = .{ .file = f },
             };
         } else {
             // We can fit it in memory
@@ -520,7 +508,7 @@ pub const Request = struct {
             }
             self.content = Content{
                 .type = .Buffer,
-                .data = .{.buffer=body},
+                .data = .{ .buffer = body },
             };
         }
     }
@@ -552,16 +540,14 @@ pub const Request = struct {
             const n = std.math.min(self.content_length, 1024);
             switch (content.type) {
                 .TempFile => {
-//                     content.data.file
-//                     try std.fmt.format(out_stream, "   .body='{}',\n", .{
-//                         content.data.file[0..n]});
+                    //                     content.data.file
+                    //                     try std.fmt.format(out_stream, "   .body='{}',\n", .{
+                    //                         content.data.file[0..n]});
                 },
                 .Buffer => {
-                    try std.fmt.format(out_stream, "  .body=\"{s}\",\n", .{
-                        content.data.buffer[0..n]});
-                }
+                    try std.fmt.format(out_stream, "  .body=\"{s}\",\n", .{content.data.buffer[0..n]});
+                },
             }
-
         }
         try std.fmt.format(out_stream, "}}", .{});
     }
@@ -596,7 +582,7 @@ pub const Request = struct {
                 .TempFile => {
                     content.data.file.deinit();
                 },
-                .Buffer => {}
+                .Buffer => {},
             }
             self.content = null;
         }
@@ -608,9 +594,7 @@ pub const Request = struct {
         self.cookies.deinit();
         self.cleanup();
     }
-
 };
-
 
 const TEST_GET_1 =
     "GET /wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg HTTP/1.1\r\n" ++
@@ -626,7 +610,6 @@ const TEST_GET_1 =
     "__utma=xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x; " ++
     "__utmz=xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral\r\n" ++
     "\r\n";
-
 
 const TEST_GET_2 =
     \\GET /pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500 HTTP/1.1
@@ -654,10 +637,8 @@ const TEST_POST_1 =
     \\
 ;
 
-
-
-fn expectParseResult(buf: []const u8,  request: Request) !void {
-    var buffer: [1024*1024]u8 = undefined;
+fn expectParseResult(buf: []const u8, request: Request) !void {
+    var buffer: [1024 * 1024]u8 = undefined;
     const allocator = std.heap.FixedBufferAllocator.init(&buffer).allocator();
     var stream = try IOStream.initTest(allocator, buf);
     var r = try Request.initTest(allocator, &stream);
@@ -675,7 +656,7 @@ fn expectParseResult(buf: []const u8,  request: Request) !void {
 }
 
 fn expectParseError(err: anyerror, buf: []const u8) !void {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     const allocator = std.heap.FixedBufferAllocator.init(&buffer).allocator();
     var stream = IOStream.initTest(allocator, buf) catch unreachable;
     var request = Request.initTest(allocator, &stream) catch unreachable;
@@ -710,7 +691,6 @@ test "01-parse-request-get-path" {
         .version = .Http1_1,
         .uri = "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg",
         .path = "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg",
-
     });
 }
 
@@ -724,7 +704,7 @@ test "01-parse-request-get-query" {
         .version = .Http1_1,
         .uri = "/pixel/of_doom.png?id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500",
         .path = "/pixel/of_doom.png",
-        .query = "id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500"
+        .query = "id=t3_25jzeq-t8_k2ii&hash=da31d967485cdbd459ce1e9a5dde279fef7fc381&r=1738649500",
     });
 }
 
@@ -781,7 +761,6 @@ test "01-parse-request-proxy" {
         .path = "/upload/",
     });
 }
-
 
 test "01-parse-request-port" {
     try expectParseResult(
@@ -876,19 +855,15 @@ test "01-bad-url" {
 }
 
 test "01-bad-url-character" {
-    try expectParseError(error.BadRequest,
-        "GET /"++ [_]u8{0} ++"/ HTTP/1.1\r\n" ++
+    try expectParseError(error.BadRequest, "GET /" ++ [_]u8{0} ++ "/ HTTP/1.1\r\n" ++
         "Accept: */*\r\n" ++
-        "\r\n\r\n"
-    );
+        "\r\n\r\n");
 }
 
 test "01-bad-url-character-2" {
-    try expectParseError(error.BadRequest,
-        "GET /\t HTTP/1.1\r\n" ++
+    try expectParseError(error.BadRequest, "GET /\t HTTP/1.1\r\n" ++
         "Accept: */*\r\n" ++
-        "\r\n\r\n"
-    );
+        "\r\n\r\n");
 }
 
 test "01-bad-query" {
@@ -899,7 +874,6 @@ test "01-bad-query" {
         \\
     );
 }
-
 
 test "01-empty-request-line" {
     try expectParseError(error.BadRequest,
@@ -957,37 +931,30 @@ test "01-invalid-header-name" {
 
 test "01-header-too-long" {
     const opts = Request.ParseOptions{};
-    const name = [_]u8{'x'} ** (opts.max_header_size+1024);
-    try expectParseError(error.RequestHeaderFieldsTooLarge,
-        "GET /api/something/ HTTP/1.0\r\n" ++
+    const name = [_]u8{'x'} ** (opts.max_header_size + 1024);
+    try expectParseError(error.RequestHeaderFieldsTooLarge, "GET /api/something/ HTTP/1.0\r\n" ++
         name ++ ": foo\r\n" ++
-        "\r\n\r\n"
-    );
+        "\r\n\r\n");
 }
 
 test "01-partial-request" {
-    try expectParseError(error.EndOfBuffer,
-        "GET /api/something/ HTTP/1.0\r\n" ++
-        "Host: localhost\r"
-    );
+    try expectParseError(error.EndOfBuffer, "GET /api/something/ HTTP/1.0\r\n" ++
+        "Host: localhost\r");
 }
 
 test "01-partial-request-line" {
-    try expectParseError(error.EndOfBuffer,
-        "GET /api/somethithing/long/path/slow"
-    );
+    try expectParseError(error.EndOfBuffer, "GET /api/somethithing/long/path/slow");
 }
 
 test "02-parse-request-multiple" {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
     const REQUESTS = TEST_GET_1 ++ TEST_GET_2 ++ TEST_POST_1;
     var stream = try IOStream.initTest(allocator, REQUESTS);
     var request = try Request.initTest(allocator, &stream);
     try request.parseTest(&stream);
-    try testing.expectEqualSlices(u8, request.path,
-        "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
+    try testing.expectEqualSlices(u8, request.path, "/wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg");
     try request.parseTest(&stream);
     try testing.expectEqualSlices(u8, request.path, "/pixel/of_doom.png");
     try request.parseTest(&stream);
@@ -996,9 +963,8 @@ test "02-parse-request-multiple" {
 
 }
 
-
 test "03-bench-parse-request-line" {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
@@ -1022,33 +988,32 @@ test "03-bench-parse-request-line" {
     const ns = timer.lap();
     const ms = ns / 1000000;
     const bytes = requests * n / time.ms_per_s;
-    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
-        .{requests/ms, bytes/ms, ns/requests});
+    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n", .{ requests / ms, bytes / ms, ns / requests });
 
     //stream.load("POST CRAP");
     //request = try Request.init(allocator);
     //try testing.expectError(error.BadRequest,
     //    request.parseRequestLine(&stream, 0));
 
-//     var line = try Request.StartLine.parse(a, "GET /foo HTTP/1.1");
-//     try testing.expect(mem.eql(u8, line.method, "GET"));
-//     try testing.expect(mem.eql(u8, line.path, "/foo"));
-//     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
-//     line = try RequestStartLine.parse("POST / HTTP/1.1");
-//     try testing.expect(mem.eql(u8, line.method, "POST"));
-//     try testing.expect(mem.eql(u8, line.path, "/"));
-//     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
-//
-//     try testing.expectError(error.BadRequest,
-//             RequestStartLine.parse(a, "POST CRAP"));
-//     try testing.expectError(error.BadRequest,
-//             RequestStartLine.parse(a, "POST /theform/ HTTP/1.1 DROP ALL TABLES"));
-//     try testing.expectError(error.UnsupportedHttpVersion,
-//             RequestStartLine.parse(a, "POST / HTTP/2.0"));
+    //     var line = try Request.StartLine.parse(a, "GET /foo HTTP/1.1");
+    //     try testing.expect(mem.eql(u8, line.method, "GET"));
+    //     try testing.expect(mem.eql(u8, line.path, "/foo"));
+    //     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
+    //     line = try RequestStartLine.parse("POST / HTTP/1.1");
+    //     try testing.expect(mem.eql(u8, line.method, "POST"));
+    //     try testing.expect(mem.eql(u8, line.path, "/"));
+    //     try testing.expect(mem.eql(u8, line.version, "HTTP/1.1"));
+    //
+    //     try testing.expectError(error.BadRequest,
+    //             RequestStartLine.parse(a, "POST CRAP"));
+    //     try testing.expectError(error.BadRequest,
+    //             RequestStartLine.parse(a, "POST /theform/ HTTP/1.1 DROP ALL TABLES"));
+    //     try testing.expectError(error.UnsupportedHttpVersion,
+    //             RequestStartLine.parse(a, "POST / HTTP/2.0"));
 }
 
 test "04-parse-request-headers" {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
@@ -1070,21 +1035,15 @@ test "04-parse-request-headers" {
     try testing.expectEqual(@as(usize, 6), h.headers.items.len);
 
     try testing.expectEqualSlices(u8, "server", try h.get("Host"));
-    try testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00",
-        try h.get("User-Agent"));
-    try testing.expectEqualSlices(u8, "uid=012345678901234532323; __utma=1.1234567890.1234567890.1234567890.1234567890.12; wd=2560x1600",
-        try h.get("Cookie"));
-    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        try h.get("Accept"));
-    try testing.expectEqualSlices(u8, "en-US,en;q=0.5",
-        try h.get("Accept-Language"));
-    try testing.expectEqualSlices(u8, "keep-alive",
-        try h.get("Connection"));
-
+    try testing.expectEqualSlices(u8, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20130501 Firefox/30.0 AppleWebKit/600.00 Chrome/30.0.0000.0 Trident/10.0 Safari/600.00", try h.get("User-Agent"));
+    try testing.expectEqualSlices(u8, "uid=012345678901234532323; __utma=1.1234567890.1234567890.1234567890.1234567890.12; wd=2560x1600", try h.get("Cookie"));
+    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", try h.get("Accept"));
+    try testing.expectEqualSlices(u8, "en-US,en;q=0.5", try h.get("Accept-Language"));
+    try testing.expectEqualSlices(u8, "keep-alive", try h.get("Connection"));
 }
 
 test "04-parse-request-cookies" {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
@@ -1096,36 +1055,26 @@ test "04-parse-request-cookies" {
     try testing.expectEqual(@as(usize, 9), h.headers.items.len);
 
     try testing.expectEqualSlices(u8, "www.kittyhell.com", try h.get("Host"));
-    try testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9",
-        try h.get("User-Agent"));
-    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        try h.get("Accept"));
-    try testing.expectEqualSlices(u8, "ja,en-us;q=0.7,en;q=0.3",
-        try h.get("Accept-Language"));
-    try testing.expectEqualSlices(u8, "gzip,deflate",
-        try h.get("Accept-Encoding"));
-    try testing.expectEqualSlices(u8, "Shift_JIS,utf-8;q=0.7,*;q=0.7",
-        try h.get("Accept-Charset"));
-    try testing.expectEqualSlices(u8, "115",
-        try h.get("Keep-Alive"));
-    try testing.expectEqualSlices(u8, "keep-alive",
-        try h.get("Connection"));
-    try testing.expectEqualSlices(u8,
-        "wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; " ++
+    try testing.expectEqualSlices(u8, "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9", try h.get("User-Agent"));
+    try testing.expectEqualSlices(u8, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", try h.get("Accept"));
+    try testing.expectEqualSlices(u8, "ja,en-us;q=0.7,en;q=0.3", try h.get("Accept-Language"));
+    try testing.expectEqualSlices(u8, "gzip,deflate", try h.get("Accept-Encoding"));
+    try testing.expectEqualSlices(u8, "Shift_JIS,utf-8;q=0.7,*;q=0.7", try h.get("Accept-Charset"));
+    try testing.expectEqualSlices(u8, "115", try h.get("Keep-Alive"));
+    try testing.expectEqualSlices(u8, "keep-alive", try h.get("Connection"));
+    try testing.expectEqualSlices(u8, "wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; " ++
         "__utma=xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x; " ++
-        "__utmz=xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral",
-        try h.get("Cookie"));
+        "__utmz=xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral", try h.get("Cookie"));
 
     const cookies = (try request.readCookies()).?;
     try testing.expectEqualStrings("2", try cookies.get("wp_ozh_wsa_visits"));
     try testing.expectEqualStrings("xxxxxxxxxx", try cookies.get("wp_ozh_wsa_visit_lasttime"));
     try testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.xxxxxxxxxx.x", try cookies.get("__utma"));
     try testing.expectEqualStrings("xxxxxxxxx.xxxxxxxxxx.x.x.utmccn=(referral)|utmcsr=reader.livedoor.com|utmcct=/reader/|utmcmd=referral", try cookies.get("__utmz"));
-
 }
 
 test "05-bench-parse-request-headers" {
-    var buffer: [1024*1024]u8 = undefined;
+    var buffer: [1024 * 1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
@@ -1151,6 +1100,5 @@ test "05-bench-parse-request-headers" {
     const ns = timer.lap();
     const ms = ns / 1000000;
     const bytes = requests * n / time.ms_per_s;
-    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
-        .{requests/ms, bytes/ms, ns/requests});
+    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n", .{ requests / ms, bytes / ms, ns / requests });
 }

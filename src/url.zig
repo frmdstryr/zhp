@@ -24,7 +24,7 @@ pub fn encode(dest: []u8, source: []const u8) ![]const u8 {
             const end = i + 3;
             if (end > dest.len) return error.NoSpaceLeft;
             dest[i] = '%';
-            _ = try std.fmt.bufPrint(dest[i+1..end], "{X}", .{ch});
+            _ = try std.fmt.bufPrint(dest[i + 1 .. end], "{X}", .{ch});
             i = end;
         }
     }
@@ -33,11 +33,9 @@ pub fn encode(dest: []u8, source: []const u8) ![]const u8 {
 
 test "url-encode" {
     var buf: [256]u8 = undefined;
-    const encoded = try encode(&buf,
-        "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
+    const encoded = try encode(&buf, "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
         "fp4Q/xXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg=");
-    try testing.expectEqualStrings(
-        "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
+    try testing.expectEqualStrings("hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
         "fp4Q%2FxXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg%3D", encoded);
 }
 
@@ -61,7 +59,7 @@ pub fn decode(dest: []u8, source: []const u8) ![]const u8 {
             },
             else => {
                 dest[j] = ch;
-            }
+            },
         }
         j += 1;
     }
@@ -70,21 +68,18 @@ pub fn decode(dest: []u8, source: []const u8) ![]const u8 {
 
 test "url-decode" {
     var buf: [256]u8 = undefined;
-    const decoded = try decode(&buf,
-        "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
+    const decoded = try decode(&buf, "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB%2Ftq7Z%2F" ++
         "fp4Q%2FxXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg%3D");
-    try testing.expectEqualStrings(
-        "hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
+    try testing.expectEqualStrings("hOlmDALJCWWdjzfBV4ZxJPmrdCLWB/tq7Z/" ++
         "fp4Q/xXbVPPREuMJMVGzKraTuhhNWxCCwi6yFEZg=", decoded);
 }
-
 
 // Look for host in a url
 //
 pub fn findHost(url: []const u8) []const u8 {
     var host = url;
     if (mem.indexOf(u8, host, "://")) |start| {
-        host = host[start+3..];
+        host = host[start + 3 ..];
         if (mem.indexOf(u8, host, "/")) |end| {
             host = host[0..end];
         }
