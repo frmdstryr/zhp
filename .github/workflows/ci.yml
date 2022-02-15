@@ -7,8 +7,8 @@ jobs:
       - uses: actions/checkout@v2
       - name: Install dependencies
         run: |
-            snap install zig --classic --edge
-            docker pull williamyeh/wrk
+            sudo snap install zig --classic --edge
+            sudo docker pull williamyeh/wrk
             zig version
       - name: Module test
         run: zig test -OReleaseSafe src/app.zig
