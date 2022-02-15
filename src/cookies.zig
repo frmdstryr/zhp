@@ -8,7 +8,6 @@ const simd = @import("simd.zig");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-
 pub const Cookies = struct {
     pub const Cookie = struct {
         key: []const u8,
@@ -19,7 +18,7 @@ pub const Cookies = struct {
     parsed: bool = false,
 
     pub fn init(allocator: Allocator) Cookies {
-        return Cookies{.cookies = List.init(allocator)};
+        return Cookies{ .cookies = List.init(allocator) };
     }
 
     pub fn initCapacity(allocator: Allocator, capacity: usize) !Cookies {
@@ -37,11 +36,10 @@ pub const Cookies = struct {
             // Errors are ignored
             const pos = simd.indexOf(u8, pair, "=") orelse continue;
             const key = pair[0..pos];
-            const end = pos+1;
+            const end = pos + 1;
             if (pair.len > end) {
                 const value = pair[end..];
-                self.cookies.appendAssumeCapacity(
-                    Cookie{.key=key, .value=value});
+                self.cookies.appendAssumeCapacity(Cookie{ .key = key, .value = value });
             }
         }
     }
@@ -53,22 +51,23 @@ pub const Cookies = struct {
         return error.KeyError;
     }
 
-    pub fn get(self: *Cookies, key: []const u8) ![]const u8 {
+    pub fn get(self: Cookies, key: []const u8) ![]const u8 {
         const i = try self.lookup(key);
         return self.cookies.items[i].value;
     }
 
-    pub fn getOptional(self: *Cookies, key: []const u8) ?[]const u8 {
+    pub fn getOptional(self: Cookies, key: []const u8) ?[]const u8 {
         return self.get(key) catch null;
     }
 
-    pub fn getDefault(self: *Cookies, key: []const u8,
-                      default: []const u8) []const u8 {
+    pub fn getDefault(self: Cookies, key: []const u8, default: []const u8) []const u8 {
         return self.get(key) catch default;
     }
 
-    pub fn contains(self: *Cookies, key: []const u8) bool {
-        _ = self.lookup(key) catch { return false; };
+    pub fn contains(self: Cookies, key: []const u8) bool {
+        _ = self.lookup(key) catch {
+            return false;
+        };
         return true;
     }
 
@@ -82,7 +81,6 @@ pub const Cookies = struct {
     }
 };
 
-
 test "cookie-parse-api" {
     const header = "azk=ue1-5eb08aeed9a7401c9195cb933eb7c966";
     var cookies = try Cookies.initCapacity(std.testing.allocator, 32);
@@ -93,9 +91,7 @@ test "cookie-parse-api" {
     try testing.expect(cookies.contains("azk"));
     try testing.expect(!cookies.contains("AZK"));
 
-    try testing.expectEqualStrings(
-        "ue1-5eb08aeed9a7401c9195cb933eb7c966",
-        try cookies.get("azk"));
+    try testing.expectEqualStrings("ue1-5eb08aeed9a7401c9195cb933eb7c966", try cookies.get("azk"));
 
     try testing.expectEqual(cookies.getOptional("user"), null);
     try testing.expectEqualStrings("default", cookies.getDefault("user", "default"));
@@ -107,15 +103,11 @@ test "cookie-parse-multiple" {
     defer cookies.deinit();
     try cookies.parse(header);
 
+    try testing.expectEqualStrings("6754579095859875029", try cookies.get("S_9994987"));
 
-    try testing.expectEqualStrings("6754579095859875029",
-        try cookies.get("S_9994987"));
+    try testing.expectEqualStrings("01fmFvgRnI09SF00000", try cookies.get("A4"));
 
-    try testing.expectEqualStrings("01fmFvgRnI09SF00000",
-        try cookies.get("A4"));
-
-    try testing.expectEqualStrings("d1263d39-874b-4a89-86cd-a2ab0860ed4e3Zl040",
-        try cookies.get("u2"));
+    try testing.expectEqualStrings("d1263d39-874b-4a89-86cd-a2ab0860ed4e3Zl040", try cookies.get("u2"));
 }
 
 test "cookie-parse-empty-ignored" {
@@ -124,9 +116,7 @@ test "cookie-parse-empty-ignored" {
     defer cookies.deinit();
     try cookies.parse(header);
 
-    try testing.expectEqualStrings("6754579095859875029",
-        try cookies.get("S_9994987"));
+    try testing.expectEqualStrings("6754579095859875029", try cookies.get("S_9994987"));
 
-    try testing.expectEqualStrings("d1263d39-874b-4a89-86cd-a2ab0860ed4e3Zl040",
-        try cookies.get("u2"));
+    try testing.expectEqualStrings("d1263d39-874b-4a89-86cd-a2ab0860ed4e3Zl040", try cookies.get("u2"));
 }

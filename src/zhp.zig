@@ -20,8 +20,6 @@ pub const Request = @import("request.zig").Request;
 pub const Response = @import("response.zig").Response;
 pub const Websocket = websocket.Websocket;
 
-
-
 pub const IOStream = util.IOStream;
 pub const app = @import("app.zig");
 pub const Route = app.Route;
@@ -29,4 +27,3 @@ pub const Router = app.Router;
 pub const ServerRequest = app.ServerRequest;
 pub const Application = app.Application;
 pub const Middleware = app.Middleware;
-

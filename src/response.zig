@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------- //
-// Copyright (c) 2019-2020, Jairus Martin.                                    //
+// Copyright (c) 2019-2022, Jairus Martin.                                    //
 // Distributed under the terms of the MIT License.                            //
 // The full license is in the file LICENSE, distributed with this software.   //
 // -------------------------------------------------------------------------- //
@@ -16,7 +16,6 @@ const testing = std.testing;
 
 const Bytes = std.ArrayList(u8);
 
-
 pub const Response = struct {
     pub const WriteError = error{OutOfMemory};
     pub const Writer = std.io.Writer(*Response, WriteError, Response.writeFn);
@@ -24,7 +23,7 @@ pub const Response = struct {
     // Allocator for this response
     allocator: Allocator = undefined,
     headers: Headers,
-    status: Status = responses.OK,
+    status: *const Status = responses.OK,
     disconnect_on_finish: bool = false,
     chunking_output: bool = false,
 
@@ -49,7 +48,7 @@ pub const Response = struct {
 
     // Must be called before writing
     pub fn prepare(self: *Response) void {
-        self.stream = Writer{.context = self};
+        self.stream = Writer{ .context = self };
     }
 
     // Reset the request so it can be reused without reallocating memory
@@ -75,7 +74,7 @@ pub const Response = struct {
     /// if something was written to the stream already it will be cleared
     pub fn redirect(self: *Response, location: []const u8) !void {
         try self.headers.put("Location", location);
-        self.status = web.responses.FOUND;
+        self.status = responses.FOUND;
         self.body.items.len = 0; // Erase anything that was written
     }
 
@@ -83,9 +82,7 @@ pub const Response = struct {
         self.headers.deinit();
         self.body.deinit();
     }
-
 };
-
 
 test "response" {
     const allocator = std.testing.allocator;

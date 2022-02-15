@@ -4,7 +4,6 @@ const std = @import("std");
 // by alexnask
 // https://github.com/alexnask/ctregex.zig
 
-
 fn utf16leCharSequenceLength(first_char: u16) !u2 {
     const c0: u21 = first_char;
     if (first_char & ~@as(u21, 0x03ff) == 0xd800) {
@@ -194,7 +193,7 @@ const RegexParser = struct {
         const line_suffix = if (end_idx == parser.iterator.bytes.len) "\n" else " [...]\n";
 
         const ArgTuple = struct {
-            tuple: anytype= .{},
+            tuple: anytype = .{},
         };
         var arg_list = ArgTuple{};
         for (args) |arg| {
