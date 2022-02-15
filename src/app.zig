@@ -338,7 +338,12 @@ pub const ServerConnection = struct {
 
             // Request handler already sent the response
             if (self.io.closed or response.finished) return;
-            try self.sendResponse(server_request);
+
+            // Send response, if the client drops, ignore it
+            self.sendResponse(server_request) catch |err| switch (err) {
+                error.BrokenPipe, error.ConnectionResetByPeer => return,
+                else => return err,
+            };
 
             const keep_alive = self.canKeepAlive(request);
             if (self.io.closed or !keep_alive) return;
