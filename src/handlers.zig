@@ -431,7 +431,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
             hash.final(&out);
 
             // Encode it
-            return std.base64.standard_encoder.encode(&self.accept_key, &out);
+            return std.base64.standard.Encoder.encode(&self.accept_key, &out);
         }
 
         pub fn stream(self: *Self, io: *web.IOStream) !usize {

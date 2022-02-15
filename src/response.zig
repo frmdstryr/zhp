@@ -22,7 +22,7 @@ pub const Response = struct {
     pub const Writer = std.io.Writer(*Response, WriteError, Response.writeFn);
 
     // Allocator for this response
-    allocator: *Allocator = undefined,
+    allocator: Allocator = undefined,
     headers: Headers,
     status: Status = responses.OK,
     disconnect_on_finish: bool = false,
@@ -39,7 +39,7 @@ pub const Response = struct {
     // Buffer for output body, if the response is too big use source_stream
     body: Bytes,
 
-    pub fn initCapacity(allocator: *Allocator, buffer_size: usize, max_headers: usize) !Response {
+    pub fn initCapacity(allocator: Allocator, buffer_size: usize, max_headers: usize) !Response {
         return Response{
             .allocator = allocator,
             .headers = try Headers.initCapacity(allocator, max_headers),

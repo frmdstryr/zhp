@@ -169,6 +169,46 @@ test "days-before-year" {
     try testing.expect(DI100Y == 25 * DI4Y - 1);
 }
 
+
+// Calculate the number of days of the first monday for week 1 iso calendar
+// for the given year since 01-Jan-0001
+pub fn daysBeforeFirstMonday(year: u16) u32 {
+    // From cpython/datetime.py _isoweek1monday
+    const THURSDAY = 3;
+    const first_day = ymd2ord(year, 1, 1);
+    const first_weekday = (first_day + 6) % 7;
+    var week1_monday = first_day - first_weekday;
+    if (first_weekday > THURSDAY) {
+        week1_monday += 7;
+    }
+    return week1_monday;
+}
+
+
+test "iso-first-monday" {
+    // Created using python
+    const years = [20]u16{
+        1816, 1823, 1839, 1849, 1849, 1870, 1879, 1882, 1909, 1910,
+        1917, 1934, 1948, 1965, 1989, 2008, 2064, 2072, 2091, 2096
+    };
+    const output = [20]u32{
+        662915, 665470, 671315, 674969, 674969, 682641, 685924, 687023,
+        696886, 697250, 699805, 706014, 711124, 717340, 726104, 733041,
+        753495, 756421, 763358, 765185
+    };
+    for (years) |year, i| {
+        try testing.expectEqual(daysBeforeFirstMonday(year), output[i]);
+    }
+}
+
+
+pub const ISOCalendar = struct {
+    year: u16,
+    week: u6, // Week of year 1-53
+    weekday: u3, // Day of week 1-7
+};
+
+
 pub const Date = struct {
     year: u16,
     month: u4 = 1, // Month of year
@@ -310,6 +350,33 @@ pub const Date = struct {
         return @intCast(i64, days) * time.ms_per_day;
     }
 
+    // Convert to an ISOCalendar date containg the year, week number, and
+    // weekday. First week is 1. Monday is 1, Sunday is 7.
+    pub fn isoCalendar(self: Date) ISOCalendar {
+        // Ported from python's isocalendar.
+        var y = self.year;
+        var first_monday = daysBeforeFirstMonday(y);
+        const today = ymd2ord(self.year, self.month, self.day);
+        if (today < first_monday) {
+            y -= 1;
+            first_monday = daysBeforeFirstMonday(y);
+        }
+        const days_between = today - first_monday;
+        var week = @divFloor(days_between, 7);
+        var day = @mod(days_between, 7);
+        if (week >= 52 and today >= daysBeforeFirstMonday(y+1)) {
+            y += 1;
+            week = 0;
+        }
+        assert(week >= 0 and week < 53);
+        assert(day >= 0 and day < 8);
+        return ISOCalendar{
+            .year=y,
+            .week=@intCast(u6, week+1),
+            .weekday=@intCast(u3, day+1)
+        };
+    }
+
     // ------------------------------------------------------------------------
     // Comparisons
     // ------------------------------------------------------------------------
@@ -348,6 +415,15 @@ pub const Date = struct {
     // ------------------------------------------------------------------------
     // Parsing
     // ------------------------------------------------------------------------
+    // Parse date in format YYYY-MM-DD. Numbers must be zero padded.
+    pub fn parseIso(ymd: []const u8) !Date {
+        const value = std.mem.trim(u8, ymd, " ");
+        if (value.len != 10) return error.InvalidFormat;
+        const year = std.fmt.parseInt(u16, value[0..4], 10) catch return error.InvalidFormat;
+        const month = std.fmt.parseInt(u8, value[5..7], 10) catch return error.InvalidFormat;
+        const day = std.fmt.parseInt(u8, value[8..10], 10) catch return error.InvalidFormat;
+        return Date.create(year, month, day);
+    }
 
     // TODO: Parsing
 
@@ -356,8 +432,13 @@ pub const Date = struct {
     // ------------------------------------------------------------------------
 
     // Return date in ISO format YYYY-MM-DD
+    const ISO_DATE_FMT = "{:0>4}-{:0>2}-{:0>2}";
     pub fn formatIso(self: Date, buf: []u8) ![]u8 {
-        return std.fmt.bufPrint(buf, "{}-{}-{}", .{ self.year, self.month, self.day });
+        return std.fmt.bufPrint(buf, ISO_DATE_FMT, .{ self.year, self.month, self.day });
+    }
+
+    pub fn writeIso(self: Date, writer: anytype) !void {
+      try std.fmt.format(writer, ISO_DATE_FMT, .{ self.year, self.month, self.day });
     }
 
     // ------------------------------------------------------------------------
@@ -375,6 +456,11 @@ pub const Date = struct {
     pub fn dayOfWeek(self: Date) Weekday {
         const dow = @intCast(u3, self.toOrdinal() % 7);
         return @intToEnum(Weekday, if (dow == 0) 7 else dow);
+    }
+
+    // Return the ISO calendar based week of year. With 1 being the first week.
+    pub fn weekOfYear(self: Date) u8 {
+        return self.isoCalendar().week;
     }
 
     // Return day of week starting with Monday = 0 and Sunday = 6
@@ -616,6 +702,106 @@ test "date-copy" {
     var d1 = try Date.create(2020, 1, 1);
     var d2 = try d1.copy();
     try testing.expect(d1.eql(d2));
+}
+
+test "date-parse-iso" {
+    try testing.expectEqual(
+        try Date.parseIso("2018-12-15"),
+        try Date.create(2018, 12, 15));
+    try testing.expectEqual(
+        try Date.parseIso("2021-01-07"),
+        try Date.create(2021, 1, 7));
+    try testing.expectError(error.InvalidDate,
+        Date.parseIso("2021-13-01"));
+    try testing.expectError(error.InvalidFormat,
+        Date.parseIso("20-01-01"));
+    try testing.expectError(error.InvalidFormat,
+        Date.parseIso("2000-1-1"));
+}
+
+test "date-format-iso" {
+  var date_strs = [_][]const u8 {
+    "0959-02-05",
+    "2018-12-15",
+  };
+
+  for (date_strs) |date_str| {
+    var d = try Date.parseIso(date_str);
+    var buf: [32]u8 = undefined;
+    try testing.expectEqualStrings(date_str, try d.formatIso(buf[0..]));
+  }
+}
+
+test "date-write-iso" {
+  var date_strs = [_][]const u8 {
+    "0959-02-05",
+    "2018-12-15",
+  };
+
+  for (date_strs) |date_str| {
+    var buf: [32]u8 = undefined;
+    var stream = std.io.fixedBufferStream(buf[0..]);
+    var d = try Date.parseIso(date_str);
+    try d.writeIso(stream.writer());
+    try testing.expectEqualStrings(date_str, stream.getWritten());
+  }
+}
+
+test "date-isocalendar" {
+    const today = try Date.create(2021, 8, 12);
+    try testing.expectEqual(today.isoCalendar(),
+        ISOCalendar{.year=2021, .week=32, .weekday=4});
+
+    // Some random dates and outputs generated with python
+    const dates = [15][]const u8{
+        "2018-12-15",
+        "2019-01-19",
+        "2019-10-14",
+        "2020-09-26",
+
+        // Border cases
+        "2020-12-27",
+        "2020-12-30",
+        "2020-12-31",
+
+        "2021-01-01",
+        "2021-01-03",
+        "2021-01-04",
+        "2021-01-10",
+
+        "2021-09-14",
+        "2022-09-12",
+        "2023-04-10",
+        "2024-01-16",
+    };
+
+    const expect = [15]ISOCalendar{
+        ISOCalendar{.year=2018, .week=50, .weekday=6},
+        ISOCalendar{.year=2019, .week=3, .weekday=6},
+        ISOCalendar{.year=2019, .week=42, .weekday=1},
+        ISOCalendar{.year=2020, .week=39, .weekday=6},
+
+        ISOCalendar{.year=2020, .week=52, .weekday=7},
+        ISOCalendar{.year=2020, .week=53, .weekday=3},
+        ISOCalendar{.year=2020, .week=53, .weekday=4},
+
+        ISOCalendar{.year=2020, .week=53, .weekday=5},
+        ISOCalendar{.year=2020, .week=53, .weekday=7},
+        ISOCalendar{.year=2021, .week=1, .weekday=1},
+        ISOCalendar{.year=2021, .week=1, .weekday=7},
+
+        ISOCalendar{.year=2021, .week=37, .weekday=2},
+        ISOCalendar{.year=2022, .week=37, .weekday=1},
+        ISOCalendar{.year=2023, .week=15, .weekday=1},
+        ISOCalendar{.year=2024, .week=3, .weekday=2},
+    };
+
+    for (dates) |d, i| {
+        const date = try Date.parseIso(d);
+        const cal = date.isoCalendar();
+        try testing.expectEqual(cal, expect[i]);
+        try testing.expectEqual(date.weekOfYear(), expect[i].week);
+    }
 }
 
 
@@ -1141,7 +1327,7 @@ pub const Datetime = struct {
 
     // Formats a timestamp in the format used by HTTP.
     // eg "Tue, 15 Nov 1994 08:12:31 GMT"
-    pub fn formatHttp(self: *Datetime, allocator: *Allocator) ![]const u8 {
+    pub fn formatHttp(self: *Datetime, allocator: Allocator) ![]const u8 {
         return try std.fmt.allocPrint(allocator, "{s}, {d} {s} {d} {d:0>2}:{d:0>2}:{d:0>2} {s}", .{
             self.date.weekdayName()[0..3],
             self.date.day,
@@ -1247,8 +1433,8 @@ test "datetime-shift-timezones" {
 
     // Shift back works
     const original = t.shiftTimezone(&timezones.UTC);
-    //std.debug.warn("\nutc={}\n", .{utc});
-    //std.debug.warn("original={}\n", .{original});
+    //std.log.warn("\nutc={}\n", .{utc});
+    //std.log.warn("original={}\n", .{original});
     try testing.expect(utc.date.eql(original.date));
     try testing.expect(utc.time.eql(original.time));
     try testing.expect(utc.eql(original));
@@ -1357,7 +1543,7 @@ test "file-modified-date" {
     var stat = try f.stat();
     var buf: [32]u8 = undefined;
     var str = try Datetime.formatHttpFromModifiedDate(&buf, stat.mtime);
-    std.debug.warn("Modtime: {s}\n", .{str});
+    std.log.warn("Modtime: {s}\n", .{str});
 }
 
 test "readme-example" {
@@ -1372,7 +1558,7 @@ test "readme-example" {
     var now = Datetime.now();
     var now_str = try now.formatHttp(allocator);
     defer allocator.free(now_str);
-    std.debug.warn("The time is now: {s}\n", .{now_str});
+    std.log.warn("The time is now: {s}\n", .{now_str});
     // The time is now: Fri, 20 Dec 2019 22:03:02 UTC
 
 

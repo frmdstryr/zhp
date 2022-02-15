@@ -107,7 +107,7 @@ pub const ServerRequest = struct {
         Start,
         Finish
     };
-    allocator: *Allocator,
+    allocator: Allocator,
     application: *Application,
 
     // Storage the fixed buffer allocator used for each request handler
@@ -126,7 +126,7 @@ pub const ServerRequest = struct {
     // Request parse error or some handler error
     err: ?anyerror = null,
 
-    pub fn init(allocator: *Allocator, app: *Application) !ServerRequest {
+    pub fn init(allocator: Allocator, app: *Application) !ServerRequest {
         return ServerRequest{
             .allocator = allocator,
             .application = app,
@@ -152,7 +152,7 @@ pub const ServerRequest = struct {
         self.response.prepare();
 
         // Replace the allocator so request handlers have limited memory
-        self.response.allocator = &self.buffer.allocator;
+        self.response.allocator = self.buffer.allocator();
     }
 
     // Reset so it can be reused
@@ -169,7 +169,7 @@ pub const ServerRequest = struct {
     pub fn release(self: *ServerRequest) void {
         self.stream = null;
         const app = self.application;
-        const lock = app.request_pool.lock.acquire();
+        const lock = app.request_pool.acquire();
         defer lock.release();
         app.request_pool.release(self);
     }
@@ -196,7 +196,7 @@ pub const ServerConnection = struct {
     // Outstanding requests
     //requests: RequestList,
 
-    pub fn init(allocator: *Allocator, app: *Application) !ServerConnection {
+    pub fn init(allocator: Allocator, app: *Application) !ServerConnection {
         return ServerConnection{
             .application = app,
             .io = try IOStream.initCapacity(allocator, null, 0, mem.page_size),
@@ -227,7 +227,7 @@ pub const ServerConnection = struct {
         // pipelining but it currently makes it slower
         var server_request: *ServerRequest = undefined;
         {
-            const lock = app.request_pool.lock.acquire();
+            const lock = app.request_pool.acquire();
             defer lock.release();
 
             if (app.request_pool.get()) |c| {
@@ -432,7 +432,7 @@ pub const ServerConnection = struct {
 
     pub fn release(self: *ServerConnection) void {
         const app = self.application;
-        const lock = app.connection_pool.lock.acquire();
+        const lock = app.connection_pool.acquire();
         defer lock.release();
         app.connection_pool.release(self);
     }
@@ -490,7 +490,7 @@ pub const Clock = struct {
     value: []const u8 = "",
 
     pub fn get(self: *Clock) []const u8 {
-        var lock = self.lock.acquire();
+        const lock = self.lock.acquire();
         defer lock.release();
         return self.value;
     }
@@ -615,7 +615,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Server setup
     // ------------------------------------------------------------------------
-    allocator: *Allocator,
+    allocator: Allocator,
     server: net.StreamServer,
     connection_pool: ConnectionPool,
     request_pool: RequestPool,
@@ -626,7 +626,7 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Setup
     // ------------------------------------------------------------------------
-    pub fn init(allocator: *Allocator, options: Options,) Application {
+    pub fn init(allocator: Allocator, options: Options,) Application {
         mimetypes.instance = mimetypes.Registry.init(allocator);
         return Application{
             .allocator = allocator,
@@ -686,14 +686,14 @@ pub const Application = struct {
 
         while (self.running) {
             // Grab a frame
-            const lock = self.connection_pool.lock.acquire();
-                var server_conn: *ServerConnection = undefined;
-                if (self.connection_pool.get()) |c| {
-                    server_conn = c;
-                } else {
-                    server_conn = try self.connection_pool.create();
-                    server_conn.* = try ServerConnection.init(self.allocator, self);
-                    //server_conn.server_request.prepare();
+            var lock = self.connection_pool.acquire();
+            var server_conn: *ServerConnection = undefined;
+            if (self.connection_pool.get()) |c| {
+                server_conn = c;
+            } else {
+                server_conn = try self.connection_pool.create();
+                server_conn.* = try ServerConnection.init(self.allocator, self);
+                //server_conn.server_request.prepare();
             }
             lock.release();
 
@@ -734,7 +734,7 @@ pub const Application = struct {
         const path = server_request.request.path;
         inline for (routes) |*route| {
             if (try regex.match(route.pattern, .{.encoding=.ascii}, path)) |*match| {
-                //std.debug.warn("Route: name={s} path={s}\n", .{route.name, request.path});
+                //std.log.warn("Route: name={s} path={s}\n", .{route.name, request.path});
                 if (match.captures.len > 0) {
                     server_request.request.args = match.captures[0..];
                 }
@@ -771,7 +771,7 @@ pub const Application = struct {
             time.sleep(1*time.ns_per_s);
             self.clock.update();
             {
-                var lock = self.connection_pool.lock.acquire();
+                const lock = self.connection_pool.acquire();
                 defer lock.release();
                 if (self.connection_pool.free_objects.popOrNull()) |conn| {
                     conn.deinit();
@@ -780,7 +780,7 @@ pub const Application = struct {
             }
 
             {
-                var lock = self.request_pool.lock.acquire();
+                const lock = self.request_pool.acquire();
                 defer lock.release();
                 if (self.request_pool.free_objects.popOrNull()) |req| {
                     req.deinit();
@@ -791,7 +791,7 @@ pub const Application = struct {
     }
 
     pub fn closeAllConnections(self: *Application) void {
-        const lock = self.connection_pool.lock.acquire();
+        const lock = self.connection_pool.acquire();
         defer lock.release();
         var n: usize = 0;
         for (self.connection_pool.objects.items) |server_conn| {

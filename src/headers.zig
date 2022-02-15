@@ -31,13 +31,13 @@ pub const Headers = struct {
     pub const HeaderList = std.ArrayList(Header);
     headers: HeaderList,
 
-    pub fn init(allocator: *Allocator) Headers {
+    pub fn init(allocator: Allocator) Headers {
         return Headers{
             .headers = HeaderList.init(allocator),
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, num: usize) !Headers {
+    pub fn initCapacity(allocator: Allocator, num: usize) !Headers {
         return Headers{
             .headers = try HeaderList.initCapacity(allocator, num),
         };
@@ -215,7 +215,7 @@ pub const Headers = struct {
                 return error.BadRequest;
             }
 
-            //std.debug.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
+            //std.log.warn("Found header: '{}'='{}'\n", .{key.?, value.?});
             self.appendAssumeCapacity(key.?, value.?);
         }
 
@@ -231,7 +231,7 @@ pub const Headers = struct {
         fba.end_index = data.len; // Ensure we don't modify the buffer
 
         // Don't deinit since we don't actually own the data
-        var buf = Bytes.fromOwnedSlice(&fba.allocator, fba.buffer);
+        var buf = Bytes.fromOwnedSlice(fba.allocator(), fba.buffer);
         var stream = IOStream.fromBuffer(fba.buffer);
         try self.parse(&buf, &stream, max_size);
     }
@@ -260,7 +260,7 @@ test "headers-put" {
     try headers.put("Cookie", "Nom;nom;nom");
     try testing.expectEqualSlices(u8, try headers.get("Cookie"), "Nom;nom;nom");
     try headers.put("COOKie", "ABC"); // Squash even if different
-    std.debug.warn("Cookie is: {s}", .{try headers.get("Cookie")});
+    std.log.warn("Cookie is: {s}", .{try headers.get("Cookie")});
     try testing.expectEqualSlices(u8, try headers.get("Cookie"), "ABC");
 }
 

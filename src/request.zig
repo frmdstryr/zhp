@@ -163,7 +163,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Constructors
     // ------------------------------------------------------------------------
-    pub fn initCapacity(allocator: *Allocator,
+    pub fn initCapacity(allocator: Allocator,
                         buffer_size: usize,
                         max_headers: usize,
                         max_cookies: usize) !Request {
@@ -177,7 +177,7 @@ pub const Request = struct {
     // ------------------------------------------------------------------------
     // Testing
     // ------------------------------------------------------------------------
-    pub fn initTest(allocator: *Allocator, stream: *IOStream) !Request {
+    pub fn initTest(allocator: Allocator, stream: *IOStream) !Request {
         //if (!builtin.is_test) @compileError("This is for testing only");
         return Request{
             .buffer = Bytes.fromOwnedSlice(allocator, stream.in_buffer),
@@ -658,7 +658,7 @@ const TEST_POST_1 =
 
 fn expectParseResult(buf: []const u8,  request: Request) !void {
     var buffer: [1024*1024]u8 = undefined;
-    const allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
+    const allocator = std.heap.FixedBufferAllocator.init(&buffer).allocator();
     var stream = try IOStream.initTest(allocator, buf);
     var r = try Request.initTest(allocator, &stream);
     try r.parseTest(&stream);
@@ -676,7 +676,7 @@ fn expectParseResult(buf: []const u8,  request: Request) !void {
 
 fn expectParseError(err: anyerror, buf: []const u8) !void {
     var buffer: [1024*1024]u8 = undefined;
-    const allocator = &std.heap.FixedBufferAllocator.init(&buffer).allocator;
+    const allocator = std.heap.FixedBufferAllocator.init(&buffer).allocator();
     var stream = IOStream.initTest(allocator, buf) catch unreachable;
     var request = Request.initTest(allocator, &stream) catch unreachable;
     try testing.expectError(err, request.parseTest(&stream));
@@ -981,7 +981,7 @@ test "01-partial-request-line" {
 test "02-parse-request-multiple" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = fba.allocator();
     const REQUESTS = TEST_GET_1 ++ TEST_GET_2 ++ TEST_POST_1;
     var stream = try IOStream.initTest(allocator, REQUESTS);
     var request = try Request.initTest(allocator, &stream);
@@ -1000,7 +1000,7 @@ test "02-parse-request-multiple" {
 test "03-bench-parse-request-line" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = fba.allocator();
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
 
@@ -1022,7 +1022,7 @@ test "03-bench-parse-request-line" {
     const ns = timer.lap();
     const ms = ns / 1000000;
     const bytes = requests * n / time.ms_per_s;
-    std.debug.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
+    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
         .{requests/ms, bytes/ms, ns/requests});
 
     //stream.load("POST CRAP");
@@ -1050,7 +1050,7 @@ test "03-bench-parse-request-line" {
 test "04-parse-request-headers" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = fba.allocator();
 
     var stream = try IOStream.initTest(allocator,
         \\GET / HTTP/1.1
@@ -1086,7 +1086,7 @@ test "04-parse-request-headers" {
 test "04-parse-request-cookies" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = fba.allocator();
 
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
@@ -1127,7 +1127,7 @@ test "04-parse-request-cookies" {
 test "05-bench-parse-request-headers" {
     var buffer: [1024*1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const allocator = &fba.allocator;
+    const allocator = fba.allocator();
 
     var stream = try IOStream.initTest(allocator, TEST_GET_1);
     var request = try Request.initTest(allocator, &stream);
@@ -1151,6 +1151,6 @@ test "05-bench-parse-request-headers" {
     const ns = timer.lap();
     const ms = ns / 1000000;
     const bytes = requests * n / time.ms_per_s;
-    std.debug.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
+    std.log.warn("\n    {}k req/s {}MB/s ({} ns/req)\n",
         .{requests/ms, bytes/ms, ns/requests});
 }

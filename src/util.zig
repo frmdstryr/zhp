@@ -60,7 +60,7 @@ pub const IOStream = struct {
     pub const ReadError = Stream.ReadError;
     const Self = @This();
 
-    allocator: ?*Allocator = null,
+    allocator: ?Allocator = null,
     in_buffer: []u8 = undefined,
     out_buffer: []u8 = undefined,
     _in_start_index: usize = 0,
@@ -86,7 +86,7 @@ pub const IOStream = struct {
         };
     }
 
-    pub fn initCapacity(allocator: *Allocator, stream: ?Stream,
+    pub fn initCapacity(allocator: Allocator, stream: ?Stream,
                         in_capacity: usize, out_capacity: usize) !IOStream {
         return IOStream{
             .allocator = allocator,
@@ -116,12 +116,12 @@ pub const IOStream = struct {
     // ------------------------------------------------------------------------
     // Testing utilities
     // ------------------------------------------------------------------------
-    pub fn initTest(allocator: *Allocator, in_buffer: []const u8) !IOStream {
+    pub fn initTest(allocator: Allocator, in_buffer: []const u8) !IOStream {
         return IOStream{
             .allocator = allocator,
             .in_stream = invalid_stream,
             .out_stream = invalid_stream,
-            .in_buffer = try mem.dupe(allocator, u8, in_buffer),
+            .in_buffer = try allocator.dupe(u8, in_buffer),
             .owns_in_buffer = in_buffer.len > 0,
             ._in_start_index = 0,
             ._in_end_index = in_buffer.len,
@@ -129,8 +129,8 @@ pub const IOStream = struct {
     }
 
     // Load into the in buffer for testing purposes
-    pub fn load(self: *Self, allocator: *Allocator, in_buffer: []const u8) !void {
-        self.in_buffer = try mem.dupe(allocator, u8, in_buffer);
+    pub fn load(self: *Self, allocator: Allocator, in_buffer: []const u8) !void {
+        self.in_buffer = try allocator.dupe(u8, in_buffer);
         self._in_start_index = 0;
         self._in_end_index = in_buffer.len;
     }
@@ -503,7 +503,7 @@ pub const IOStream = struct {
 //         const in_stream = &self.in_stream;
 //         const out_stream = &self.out_stream ;
 //         if (in_stream.handle != 0) in_stream.close();
-//         std.debug.warn("Close in={} out={}\n", .{in_stream, out_stream});
+//         std.log.warn("Close in={} out={}\n", .{in_stream, out_stream});
 //         if (in_stream.handle != out_stream.handle and out_stream.handle != 0) {
 //             out_stream.close();
 //         }
@@ -523,15 +523,23 @@ pub const IOStream = struct {
 
 };
 
+const DummyHeldLock = struct {
+    mutex: *std.Thread.Mutex,
+    pub fn release(self: DummyHeldLock) void {
+        self.mutex.unlock();
+    }
+};
+
 // The event based lock doesn't work without evented io
 pub const Lock = if (std.io.is_async) std.event.Lock else std.Thread.Mutex;
+pub const HeldLock = if (std.io.is_async) std.event.Lock.Held else DummyHeldLock;
 
 pub fn ObjectPool(comptime T: type) type {
     return struct {
         const Self = @This();
         pub const ObjectList = std.ArrayList(*T);
 
-        allocator: *Allocator,
+        allocator: Allocator,
         // Stores all created objects
         objects: ObjectList,
 
@@ -539,9 +547,9 @@ pub fn ObjectPool(comptime T: type) type {
         free_objects: ObjectList,
 
         // Lock to use if using threads
-        lock: Lock = Lock{},
+        mutex: Lock = Lock{},
 
-        pub fn init(allocator: *Allocator) Self {
+        pub fn init(allocator: Allocator) Self {
             return Self{
                 .allocator = allocator,
                 .objects = ObjectList.init(allocator),
@@ -559,7 +567,7 @@ pub fn ObjectPool(comptime T: type) type {
         pub fn create(self: *Self) !*T {
             const obj = try self.allocator.create(T);
             try self.objects.append(obj);
-            try self.free_objects.ensureCapacity(self.objects.items.len);
+            try self.free_objects.ensureTotalCapacity(self.objects.items.len);
             return obj;
         }
 
@@ -575,6 +583,15 @@ pub fn ObjectPool(comptime T: type) type {
             }
             self.objects.deinit();
             self.free_objects.deinit();
+        }
+
+        pub fn acquire(self: *Self) HeldLock {
+            if (std.io.is_async) {
+                return self.mutex.acquire();
+            } else {
+                self.mutex.lock();
+                return DummyHeldLock{.mutex=&self.mutex};
+            }
         }
 
     };
@@ -614,10 +631,10 @@ pub fn StringArrayMap(comptime T: type) type {
         const Self = @This();
         pub const Array = std.ArrayList(T);
         pub const Map = std.StringHashMap(*Array);
-        allocator: *Allocator,
+        allocator: Allocator,
         storage: Map,
 
-        pub fn init(allocator: *Allocator) Self {
+        pub fn init(allocator: Allocator) Self {
             return Self{
                 .allocator = allocator,
                 .storage = Map.init(allocator),

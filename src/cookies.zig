@@ -18,11 +18,11 @@ pub const Cookies = struct {
     cookies: List,
     parsed: bool = false,
 
-    pub fn init(allocator: *Allocator) Cookies {
+    pub fn init(allocator: Allocator) Cookies {
         return Cookies{.cookies = List.init(allocator)};
     }
 
-    pub fn initCapacity(allocator: *Allocator, capacity: usize) !Cookies {
+    pub fn initCapacity(allocator: Allocator, capacity: usize) !Cookies {
         return Cookies{
             .cookies = try List.initCapacity(allocator, capacity),
         };

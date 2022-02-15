@@ -26,11 +26,11 @@ pub fn main() anyerror!void {
 
     try server.listen(req_listen_addr);
 
-    std.debug.warn("Listening at {}\n", .{server.listen_address});
+    std.log.warn("Listening at {}\n", .{server.listen_address});
 
     while (true) {
         const conn = try server.accept();
-        std.debug.warn("{}\n", .{conn});
+        std.log.warn("{}\n", .{conn});
         const frame = try allocator.create(@Frame(serve));
         frame.* = async serve(conn);
         // Don't wait!
@@ -40,7 +40,7 @@ pub fn main() anyerror!void {
 pub fn serve(conn: net.StreamServer.Connection) !void {
     defer conn.stream.close();
     handleConn(conn) catch |err| {
-        std.debug.warn("Disconnected {}: {}\n", .{conn, err});
+        std.log.warn("Disconnected {}: {}\n", .{conn, err});
     };
 }
 
