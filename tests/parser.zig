@@ -15,8 +15,8 @@ const Test = struct {
 };
 
 const tests = [_]Test{
-    .{.path="tests/http-requests.txt", .count=55},
-    .{.path="tests/bigger.txt", .count=275},
+    .{ .path = "tests/http-requests.txt", .count = 55 },
+    .{ .path = "tests/bigger.txt", .count = 275 },
 };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -29,7 +29,7 @@ pub fn main() !void {
         std.log.warn("Parsing {s}...", .{t.path});
         var file = try fs.cwd().openFile(t.path, .{});
         timer.reset();
-        var socket = net.Stream{.handle=file.handle}; // HACK...
+        var socket = net.Stream{ .handle = file.handle }; // HACK...
         const cnt = try parseRequests(socket);
         std.log.warn("Done! ({} ns/req)\n", .{timer.read() / t.count});
         try std.testing.expectEqual(t.count, cnt);
@@ -39,7 +39,7 @@ pub fn main() !void {
 pub fn parseRequests(socket: net.Stream) !usize {
     var stream = try web.IOStream.initCapacity(allocator, socket, 0, 4096);
     defer stream.deinit();
-    var request = try web.Request.initCapacity(allocator, 1024*10, 32, 32);
+    var request = try web.Request.initCapacity(allocator, 1024 * 10, 32, 32);
     defer request.deinit();
     var cnt: usize = 0;
     var end: usize = 0;
@@ -47,13 +47,10 @@ pub fn parseRequests(socket: net.Stream) !usize {
         cnt += 1;
         defer request.reset();
         request.parse(&stream, .{}) catch |err| switch (err) {
-            error.EndOfStream, error.BrokenPipe,
-            error.ConnectionResetByPeer => break,
+            error.EndOfStream, error.BrokenPipe, error.ConnectionResetByPeer => break,
             else => {
-                std.log.warn("Stream {}:\n'{s}'\n", .{
-                    end, stream.in_buffer[0..end]});
-                std.log.warn("Error parsing:\n'{s}'\n", .{
-                    request.buffer.items[0..stream.readCount()]});
+                std.log.warn("Stream {}:\n'{s}'\n", .{ end, stream.in_buffer[0..end] });
+                std.log.warn("Error parsing:\n'{s}'\n", .{request.buffer.items[0..stream.readCount()]});
                 return err;
             },
         };

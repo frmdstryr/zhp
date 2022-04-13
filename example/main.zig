@@ -8,12 +8,10 @@ const web = @import("zhp");
 const Request = web.Request;
 const Response = web.Response;
 
-
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub const io_mode = .evented;
 pub const log_level = .debug;
-
 
 /// This handler demonstrates how to send a template resrponse using
 /// zig's built-in formatting.
@@ -26,9 +24,7 @@ const TemplateHandler = struct {
         @setEvalBranchQuota(100000);
         try resp.stream.print(template, .{"ZHP"});
     }
-
 };
-
 
 /// This handler demonstrates how to set headers and
 /// write to the response stream. The response stream is buffered.
@@ -40,9 +36,7 @@ const HelloHandler = struct {
         try resp.headers.append("Content-Type", "text/plain");
         try resp.stream.writeAll("Hello, World!");
     }
-
 };
-
 
 /// This handler demonstrates how to send a streaming response.
 /// since ZHP buffers the handler output use `send_stream = true` to tell
@@ -84,8 +78,7 @@ const StreamHandler = struct {
         const conn = try std.net.tcpConnectToHost(a, "streams.sevenfm.nl", 80);
         defer conn.close();
         std.log.info("Connected!", .{});
-        try conn.writer().writeAll(
-            "GET /live HTTP/1.1\r\n" ++
+        try conn.writer().writeAll("GET /live HTTP/1.1\r\n" ++
             "Host: streams.sevenfm.nl\r\n" ++
             "Accept: */*\r\n" ++
             "Connection: keep-alive\r\n" ++
@@ -99,7 +92,7 @@ const StreamHandler = struct {
         const end = try conn.read(buf[0..]);
         const offset = if (std.mem.indexOf(u8, buf[0..end], "icy-br:")) |o| o else 0;
         try writer.writeAll(buf[offset..end]);
-        total_sent += end-offset;
+        total_sent += end - offset;
 
         // Now just forward the stream data
         while (true) {
@@ -114,9 +107,7 @@ const StreamHandler = struct {
         }
         return total_sent;
     }
-
 };
-
 
 /// This handler shows how to read headers and cookies from the request.
 /// It also shows another way to write to the response stream.
@@ -155,9 +146,7 @@ const JsonHandler = struct {
 
         try jw.endObject();
     }
-
 };
-
 
 /// This handler demonstrates how to use url arguments. The
 /// `request.args` is the result of ctregex's parsing of the url.
@@ -173,9 +162,7 @@ const ApiHandler = struct {
         try jw.emitString(args[1].?);
         try jw.endObject();
     }
-
 };
-
 
 /// When an error is returned the framework will return the error handler response
 const ErrorTestHandler = struct {
@@ -185,9 +172,7 @@ const ErrorTestHandler = struct {
         try resp.stream.writeAll("Do some work");
         return error.Ooops;
     }
-
 };
-
 
 /// Redirect shortcut
 const RedirectHandler = struct {
@@ -198,9 +183,7 @@ const RedirectHandler = struct {
         // Redirect to home
         try resp.redirect("/");
     }
-
 };
-
 
 /// Work in progress... shows one way to render and post a form.
 const FormHandler = struct {
@@ -214,12 +197,12 @@ const FormHandler = struct {
         _ = req;
         // Split the template on the key
         const form =
-        \\<form action="/form/" method="post" enctype="multipart/form-data">
+            \\<form action="/form/" method="post" enctype="multipart/form-data">
             \\<input type="text" name="name" value="Your name"><br />
             \\<input type="checkbox" name="agree" /><label>Do you like Zig?</label><br />
             \\<input type="file" name="image" /><label>Upload</label><br />
             \\<button type="submit">Submit</button>
-        \\</form>
+            \\</form>
         ;
         try resp.stream.writeAll(template[0..start]);
         try resp.stream.writeAll(form);
@@ -243,8 +226,7 @@ const FormHandler = struct {
 
             try resp.stream.print(
                 \\<h1>Hello: {s}</h1>
-                , .{if (form.fields.get("name")) |name| name else ""}
-            );
+            , .{if (form.fields.get("name")) |name| name else ""});
 
             if (form.fields.get("agree")) |f| {
                 _ = f;
@@ -259,8 +241,6 @@ const FormHandler = struct {
     }
 };
 
-
-
 const ChatHandler = struct {
     const template = @embedFile("templates/chat.html");
     pub fn get(self: *ChatHandler, req: *Request, resp: *Response) !void {
@@ -269,7 +249,6 @@ const ChatHandler = struct {
         try resp.stream.writeAll(template);
     }
 };
-
 
 /// Demonstrates the useage of the websocket protocol
 const ChatWebsocketHandler = struct {
@@ -384,7 +363,6 @@ const ChatWebsocketHandler = struct {
     }
 };
 
-
 // The routes must be defined in the "root"
 pub const routes = [_]web.Route{
     web.Route.create("cover", "/", TemplateHandler),
@@ -401,7 +379,6 @@ pub const routes = [_]web.Route{
     web.Route.static("static", "/static/", "example/static/"),
 };
 
-
 pub const middleware = [_]web.Middleware{
     //web.Middleware.create(web.middleware.LoggingMiddleware),
     //web.Middleware.create(web.middleware.SessionMiddleware),
@@ -411,7 +388,7 @@ pub fn main() !void {
     defer std.debug.assert(!gpa.deinit());
     const allocator = gpa.allocator();
 
-    var app = web.Application.init(allocator, .{.debug=true});
+    var app = web.Application.init(allocator, .{ .debug = true });
 
     defer app.deinit();
     try app.listen("127.0.0.1", 9000);

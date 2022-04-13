@@ -877,7 +877,7 @@ test "01-bad-url" {
 
 test "01-bad-url-character" {
     try expectParseError(error.BadRequest,
-        "GET /"++ [_]u8{0} ++"/ HTTP/1.1\r\n" ++
+        "GET /" ++ [_]u8{0} ++ "/ HTTP/1.1\r\n" ++
         "Accept: */*\r\n" ++
         "\r\n\r\n"
     );

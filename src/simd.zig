@@ -5,7 +5,6 @@
 // -------------------------------------------------------------------------- //
 const std = @import("std");
 
-
 pub fn copy(comptime T: type, dest: []T, source: []const T) void {
     const n = 32; // TODO: Adjust based on bitSizeOf T
     const V = @Vector(n, T);
@@ -39,7 +38,7 @@ pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
             if (!@reduce(.And, a_chunk == b_chunk)) {
                 return false;
             }
-            end = std.math.min(end+n, a.len);
+            end = std.math.min(end + n, a.len);
         }
     }
     return true;
@@ -52,7 +51,7 @@ pub fn lastIndexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?us
     const V1x32 = @Vector(n, u1);
     //const Vbx32 = @Vector(n, bool);
     const first = @splat(n, delimiter[0]);
-    const last = @splat(n, delimiter[k-1]);
+    const last = @splat(n, delimiter[k - 1]);
 
     if (buf.len < n) {
         return std.mem.lastIndexOfPos(T, buf, 0, delimiter);
@@ -61,7 +60,7 @@ pub fn lastIndexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?us
     var start: usize = buf.len - n;
     while (start > 0) {
         const end = start + n;
-        const last_end = std.math.min(end+k-1, buf.len);
+        const last_end = std.math.min(end + k - 1, buf.len);
         const last_start = last_end - n;
 
         // Look for the first character in the delimter
@@ -73,8 +72,8 @@ pub fn lastIndexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?us
             var i: usize = n;
             while (i > 0) {
                 i -= 1;
-                if (mask[i] == 1 and eql(T, buf[start+i..start+i+k], delimiter)) {
-                    return start+i;
+                if (mask[i] == 1 and eql(T, buf[start + i .. start + i + k], delimiter)) {
+                    return start + i;
                 }
             }
         }
@@ -82,7 +81,6 @@ pub fn lastIndexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?us
     }
     return null; // Not found
 }
-
 
 pub fn indexOf(comptime T: type, buf: []const u8, delimiter: []const u8) ?usize {
     return indexOfPos(T, buf, 0, delimiter);
@@ -95,13 +93,13 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
     const V1x32 = @Vector(n, u1);
     const Vbx32 = @Vector(n, bool);
     const first = @splat(n, delimiter[0]);
-    const last = @splat(n, delimiter[k-1]);
+    const last = @splat(n, delimiter[k - 1]);
 
     var end: usize = start_index + n;
     var start: usize = end - n;
     while (end < buf.len) {
         start = end - n;
-        const last_end = std.math.min(end+k-1, buf.len);
+        const last_end = std.math.min(end + k - 1, buf.len);
         const last_start = last_end - n;
 
         // Look for the first character in the delimter
@@ -111,8 +109,8 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
         if (@reduce(.Or, mask) != 0) {
             // TODO: Use __builtin_clz???
             for (@as([n]bool, @bitCast(Vbx32, mask))) |match, i| {
-                if (match and eql(T, buf[start+i..start+i+k], delimiter)) {
-                    return start+i;
+                if (match and eql(T, buf[start + i .. start + i + k], delimiter)) {
+                    return start + i;
                 }
             }
         }
@@ -124,15 +122,15 @@ pub fn indexOfPos(comptime T: type, buf: []const u8, start_index: usize, delimit
 
 pub fn split(comptime T: type, buffer: []const T, delimiter: []const T) SplitIterator(T) {
     const Iterator = SplitIterator(T);
-    return Iterator{.buffer=buffer, .delimiter=delimiter};
+    return Iterator{ .buffer = buffer, .delimiter = delimiter };
 }
 
 pub fn SplitIterator(comptime T: type) type {
     return struct {
         const Self = @This();
-            index: ?usize = 0,
-            buffer: []const T,
-            delimiter: []const T,
+        index: ?usize = 0,
+        buffer: []const T,
+        delimiter: []const T,
 
         /// Returns a slice of the next field, or null if splitting is complete.
         pub fn next(self: *Self) ?[]const T {
@@ -153,6 +151,5 @@ pub fn SplitIterator(comptime T: type) type {
             const start = self.index orelse end;
             return self.buffer[start..end];
         }
-
     };
 }

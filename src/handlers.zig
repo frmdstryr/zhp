@@ -14,7 +14,6 @@ const Datetime = web.datetime.Datetime;
 
 pub var default_stylesheet = @embedFile("templates/style.css");
 
-
 pub const IndexHandler = struct {
     pub fn get(self: *IndexHandler, request: *web.Request, response: *web.Response) !void {
         _ = self;
@@ -26,28 +25,25 @@ pub const IndexHandler = struct {
     }
 };
 
-
 pub const ServerErrorHandler = struct {
     const TemplateContext = struct {
         style: []const u8,
         request: *web.Request,
     };
-    const template = web.template.FileTemplate(TemplateContext , "templates/error.html");
+    const template = web.template.FileTemplate(TemplateContext, "templates/error.html");
 
     server_request: *web.ServerRequest,
 
-    pub fn dispatch(self: *ServerErrorHandler, request: *web.Request,
-                    response: *web.Response) anyerror!void {
+    pub fn dispatch(self: *ServerErrorHandler, request: *web.Request, response: *web.Response) anyerror!void {
         const app = web.Application.instance.?;
         response.status = responses.INTERNAL_SERVER_ERROR;
 
         // Clear any existing data
         try response.body.resize(0);
 
-
         if (app.options.debug) {
             // Split the template on the key
-            const context = TemplateContext{.style=default_stylesheet, .request=request};
+            const context = TemplateContext{ .style = default_stylesheet, .request = request };
 
             inline for (template.sections) |part| {
                 if (part.is("stacktrace")) {
@@ -56,12 +52,7 @@ pub const ServerErrorHandler = struct {
                         try response.stream.print("error: {s}\n", .{err});
                     }
                     if (@errorReturnTrace()) |trace| {
-                        try std.debug.writeStackTrace(
-                            trace.*,
-                            &response.stream,
-                            response.allocator,
-                            try std.debug.getSelfDebugInfo(),
-                            .no_color);
+                        try std.debug.writeStackTrace(trace.*, &response.stream, response.allocator, try std.debug.getSelfDebugInfo(), .no_color);
                     }
                 } else {
                     try part.render(context, response.stream);
@@ -74,40 +65,30 @@ pub const ServerErrorHandler = struct {
                 held.lock();
                 defer held.unlock();
 
-                try std.debug.writeStackTrace(
-                    trace.*,
-                    &stderr,
-                    response.allocator,
-                    try std.debug.getSelfDebugInfo(),
-                    std.debug.detectTTYConfig());
+                try std.debug.writeStackTrace(trace.*, &stderr, response.allocator, try std.debug.getSelfDebugInfo(), std.debug.detectTTYConfig());
             }
 
             try response.stream.writeAll("<h1>Server Error</h1>");
         }
     }
-
 };
 
 pub const NotFoundHandler = struct {
     const template = @embedFile("templates/not-found.html");
-    pub fn dispatch(self: *NotFoundHandler, request: *web.Request,
-                    response: *web.Response) !void {
+    pub fn dispatch(self: *NotFoundHandler, request: *web.Request, response: *web.Response) !void {
         _ = self;
         _ = request;
         response.status = responses.NOT_FOUND;
         try response.stream.print(template, .{default_stylesheet});
     }
-
 };
 
-
-pub fn StaticFileHandler(comptime static_url: []const u8,
-                         comptime static_root: []const u8) type {
+pub fn StaticFileHandler(comptime static_url: []const u8, comptime static_root: []const u8) type {
     if (!fs.path.isAbsolute(static_url)) {
         @compileError("The static url must be absolute");
     }
     // TODO: Should the root be checked if it exists?
-    return  struct {
+    return struct {
         const Self = @This();
         //handler: web.RequestHandler,
         file: ?std.fs.File = null,
@@ -115,25 +96,21 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
         end: usize = 0,
         server_request: *web.ServerRequest,
 
-        pub fn get(self: *Self, request: *web.Request,
-                   response: *web.Response) !void {
+        pub fn get(self: *Self, request: *web.Request, response: *web.Response) !void {
             const allocator = response.allocator;
             const mimetypes = &web.mimetypes.instance.?;
 
             // Determine path relative to the url root
-            const rel_path = try fs.path.relative(
-                allocator, static_url, request.path);
+            const rel_path = try fs.path.relative(allocator, static_url, request.path);
 
             // Cannot be outside the root folder
             if (rel_path.len == 0 or rel_path[0] == '.') {
                 return self.renderNotFound(request, response);
             }
 
-            const full_path = try fs.path.join(allocator, &[_][]const u8{
-                static_root, rel_path
-            });
+            const full_path = try fs.path.join(allocator, &[_][]const u8{ static_root, rel_path });
 
-            const file = fs.cwd().openFile(full_path, .{.read=true}) catch |err| {
+            const file = fs.cwd().openFile(full_path, .{ .mode = .read_only }) catch |err| {
                 // TODO: Handle debug page
                 log.warn("Static file error: {}", .{err});
                 return self.renderNotFound(request, response);
@@ -161,8 +138,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             // Set last modified time for caching purposes
             // NOTE: The modified result doesn't need freed since the response handles that
             var buf = try response.allocator.alloc(u8, 32);
-            try response.headers.append("Last-Modified",
-                try modified.formatHttpBuf(buf));
+            try response.headers.append("Last-Modified", try modified.formatHttpBuf(buf));
 
             // TODO: cache control
 
@@ -204,8 +180,7 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
                         // https://tools.ietf.org/html/rfc7233#section-2.1
                         response.status = web.responses.REQUESTED_RANGE_NOT_SATISFIABLE;
                         try response.headers.append("Content-Type", "text/plain");
-                        try response.headers.append("Content-Range",
-                            try std.fmt.allocPrint(allocator, "bytes */{}", .{size}));
+                        try response.headers.append("Content-Range", try std.fmt.allocPrint(allocator, "bytes */{}", .{size}));
                         file.close();
                         return;
                     }
@@ -216,19 +191,15 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
                     if (size != stat.size) {
                         // If it's not the full file  se it as a partial response
                         response.status = web.responses.PARTIAL_CONTENT;
-                        try response.headers.append("Content-Range",
-                            try std.fmt.allocPrint(allocator, "bytes {}-{}/{}", .{
-                                self.start, self.end, size}));
+                        try response.headers.append("Content-Range", try std.fmt.allocPrint(allocator, "bytes {}-{}/{}", .{ self.start, self.end, size }));
                     }
                 }
             }
 
             // Try to get the content type
-            const content_type = mimetypes.getTypeFromFilename(full_path)
-                orelse "application/octet-stream";
+            const content_type = mimetypes.getTypeFromFilename(full_path) orelse "application/octet-stream";
             try response.headers.append("Content-Type", content_type);
-            try response.headers.append("Content-Length",
-                try std.fmt.allocPrint(allocator, "{}", .{size}));
+            try response.headers.append("Content-Length", try std.fmt.allocPrint(allocator, "{}", .{size}));
             self.file = file;
             response.send_stream = true;
         }
@@ -296,10 +267,8 @@ pub fn StaticFileHandler(comptime static_url: []const u8,
             var handler = NotFoundHandler{};
             try handler.dispatch(request, response);
         }
-
     };
 }
-
 
 /// Handles a websocket connection
 /// See https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers
@@ -344,7 +313,7 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
                     // Set header to indicate to the client which versions are supported
                     try response.headers.append("Sec-WebSocket-Version", "7, 8, 13");
                     return error.UpgradeRequired;
-                }
+                },
             }
 
             // Create the accept key
@@ -395,15 +364,11 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
                 return Protocol.checkOrigin(request);
             } else {
                 // Version 13 uses "Origin", others use "Sec-Websocket-Origin"
-                var origin = web.url.findHost(
-                    if (request.headers.getOptional("Origin")) |o| o else
-                        request.headers.getDefault("Sec-Websocket-Origin", ""));
+                var origin = web.url.findHost(if (request.headers.getOptional("Origin")) |o| o else request.headers.getDefault("Sec-Websocket-Origin", ""));
 
                 const host = request.headers.getDefault("Host", "");
                 if (origin.len == 0 or host.len == 0 or !ascii.eqlIgnoreCase(origin, host)) {
-                    log.debug("Cross origin websockets are not allowed ('{s}' != '{s}')", .{
-                        origin, host
-                    });
+                    log.debug("Cross origin websockets are not allowed ('{s}' != '{s}')", .{ origin, host });
                     return false;
                 }
                 return true;
@@ -487,6 +452,5 @@ pub fn WebsocketHandler(comptime Protocol: type) type {
                 }
             }
         }
-
     };
 }

@@ -26,8 +26,7 @@ pub const create = Status.create;
 
 // Informational
 pub const CONTINUE = create(100, "Continue", "Request received, please continue");
-pub const SWITCHING_PROTOCOLS = create(101, "Switching Protocols",
-        "Switching to new protocol; obey Upgrade header");
+pub const SWITCHING_PROTOCOLS = create(101, "Switching Protocols", "Switching to new protocol; obey Upgrade header");
 pub const PROCESSING = create(102, "Processing", "");
 pub const EARLY_HINTS = create(103, "Early Hints", "");
 
@@ -96,7 +95,6 @@ pub const LOOP_DETECTED = create(508, "Loop Detected", "");
 pub const NOT_EXTENDED = create(510, "Not Extended", "");
 pub const NETWORK_AUTHENTICATION_REQUIRED = create(511, "Network Authentication Required", "The client needs to authenticate to gain network access");
 
-
 /// Lookup the status for the given code
 pub fn get(status_code: u16) ?Status {
     return switch (status_code) {
@@ -163,15 +161,13 @@ pub fn get(status_code: u16) ?Status {
     };
 }
 
-
 /// Lookup the status for the given code or create one with the given phrase
 pub fn getOrCreate(status_code: u16, phrase: []const u8) Status {
     return get(status_code) orelse create(status_code, phrase, "");
 }
 
-
 test "Status.create" {
-    const status = create(200, "OK",  "Request fulfilled, document follows");
+    const status = create(200, "OK", "Request fulfilled, document follows");
     try testing.expectEqual(status.code, OK.code);
     try testing.expectEqualSlices(u8, status.phrase, OK.phrase);
     try testing.expectEqualSlices(u8, status.description, OK.description);

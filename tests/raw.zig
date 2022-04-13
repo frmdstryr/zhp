@@ -14,13 +14,13 @@ pub fn main() anyerror!void {
 
     // Ignore sigpipe
     var act = os.Sigaction{
-        .handler = .{.sigaction = os.SIG_IGN },
+        .handler = .{ .sigaction = os.SIG_IGN },
         .mask = os.empty_sigset,
         .flags = 0,
     };
     os.sigaction(os.SIGPIPE, &act, null);
 
-    var server = net.StreamServer.init(.{.reuse_address=true});
+    var server = net.StreamServer.init(.{ .reuse_address = true });
     defer server.close();
     defer server.deinit();
 
@@ -40,20 +40,19 @@ pub fn main() anyerror!void {
 pub fn serve(conn: net.StreamServer.Connection) !void {
     defer conn.stream.close();
     handleConn(conn) catch |err| {
-        std.log.warn("Disconnected {}: {}\n", .{conn, err});
+        std.log.warn("Disconnected {}: {}\n", .{ conn, err });
     };
 }
 
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
     var reader = conn.stream.reader();
     var writer = conn.stream.writer();
-    var buf: [64*1024]u8 = undefined;
+    var buf: [64 * 1024]u8 = undefined;
     while (true) {
         const n = try reader.read(&buf);
         var it = std.mem.split(buf[0..n], "\r\n\r\n");
         while (it.next()) |req| {
-            try writer.writeAll(
-                "HTTP/1.1 200 OK\r\n" ++
+            try writer.writeAll("HTTP/1.1 200 OK\r\n" ++
                 "Content-Length: 15\r\n" ++
                 "Connection: keep-alive\r\n" ++
                 "Content-Type: text/plain; charset=UTF-8\r\n" ++
@@ -61,8 +60,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
                 "Date: Wed, 17 Apr 2013 12:00:00 GMT\r\n" ++
                 "\r\n" ++
                 "Hello, World!\r\n" ++
-                "\r\n"
-            );
+                "\r\n");
         }
     }
 }

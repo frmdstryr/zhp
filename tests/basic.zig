@@ -23,13 +23,12 @@ pub fn main() anyerror!void {
 
     std.log.warn("Listening at {}\n", .{server.listen_address});
 
-
     while (true) {
         const conn = try server.accept();
         std.log.warn("Connected to {}\n", .{conn.address});
         var frame = async handleConn(conn);
         await frame catch |err| {
-            std.log.warn("Disconnected {}: {}\n", .{conn.address, err});
+            std.log.warn("Disconnected {}: {}\n", .{ conn.address, err });
         };
     }
 }
@@ -37,20 +36,18 @@ pub fn main() anyerror!void {
 pub fn handleConn(conn: net.StreamServer.Connection) !void {
     var stream = try web.IOStream.initCapacity(allocator, conn.stream, 0, 4096);
     defer stream.deinit();
-    var request = try web.Request.initCapacity(allocator, 1024*10, 32, 32);
+    var request = try web.Request.initCapacity(allocator, 1024 * 10, 32, 32);
     defer request.deinit();
     var cnt: usize = 0;
     while (true) {
         cnt += 1;
         defer request.reset();
         request.parse(&stream, .{}) catch |err| switch (err) {
-            error.EndOfStream, error.BrokenPipe,
-            error.ConnectionResetByPeer => break,
+            error.EndOfStream, error.BrokenPipe, error.ConnectionResetByPeer => break,
             else => return err,
         };
 
-        try conn.stream.writer().writeAll(
-            "HTTP/1.1 200 OK\r\n" ++
+        try conn.stream.writer().writeAll("HTTP/1.1 200 OK\r\n" ++
             "Content-Length: 15\r\n" ++
             "Connection: keep-alive\r\n" ++
             "Content-Type: text/plain; charset=UTF-8\r\n" ++
@@ -58,10 +55,7 @@ pub fn handleConn(conn: net.StreamServer.Connection) !void {
             "Date: Wed, 17 Apr 2013 12:00:00 GMT\r\n" ++
             "\r\n" ++
             "Hello, World!\r\n" ++
-            "\r\n"
-        );
+            "\r\n");
     }
     return error.ClosedCleanly;
 }
-
-
