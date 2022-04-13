@@ -17,7 +17,6 @@ const Headers = web.Headers;
 
 const simd = @import("simd.zig");
 
-
 // Represents a file uploaded via a form.
 pub const FileUpload = struct {
     filename: []const u8,
@@ -25,11 +24,9 @@ pub const FileUpload = struct {
     body: []const u8,
 };
 
-
 pub const ArgMap = util.StringArrayMap([]const u8);
 pub const FileMap = util.StringArrayMap(FileUpload);
 const WS = " \t\r\n";
-
 
 pub const Form = struct {
     allocator: Allocator,
@@ -63,7 +60,7 @@ pub const Form = struct {
                 },
                 .Buffer => {
                     try self.parseMultipart(content_type, content.data.buffer);
-                }
+                },
             }
         }
     }
@@ -83,7 +80,7 @@ pub const Form = struct {
     pub fn parseMultipartFormData(self: *Form, boundary: []const u8, data: []const u8) !void {
         var bounds = boundary[0..];
         if (mem.startsWith(u8, boundary, "\"") and mem.endsWith(u8, boundary, "\"")) {
-            bounds = boundary[1..bounds.len-1];
+            bounds = boundary[1 .. bounds.len - 1];
         }
         if (bounds.len > 70) {
             return error.MultipartBoundaryTooLong;
@@ -120,11 +117,11 @@ pub const Form = struct {
                 continue;
             }
 
-            const body = part[0..eoh.?+header_sep.len];
+            const body = part[0 .. eoh.? + header_sep.len];
             // NOTE: Do not free, data is assumed to be owned
             // also do not do this after parsing or the it will cause a memory leak
             headers.reset();
-            try headers.parseBuffer(body, body.len+1);
+            try headers.parseBuffer(body, body.len + 1);
 
             const disp_header = headers.getDefault("Content-Disposition", "");
             disp_params.reset(); // NOTE: Do not free, data is assumed to be owned
@@ -143,8 +140,7 @@ pub const Form = struct {
             const field_value = part[body.len..part.len];
 
             if (disp_params.contains("filename")) {
-                const content_type = disp_params.getDefault(
-                    "Content-Type", "application/octet-stream");
+                const content_type = disp_params.getDefault("Content-Type", "application/octet-stream");
                 try self.files.append(field_name, FileUpload{
                     .filename = disp_params.getDefault("filename", ""),
                     .body = field_value,
@@ -154,12 +150,8 @@ pub const Form = struct {
                 try self.fields.append(field_name, field_value);
             }
         }
-
     }
-
 };
-
-
 
 test "simple-form" {
     const content_type = "multipart/form-data; boundary=---------------------------389538318911445707002572116565";
@@ -172,8 +164,7 @@ test "simple-form" {
         "Content-Disposition: form-data; name=\"action\"\r\n" ++
         "\r\n" ++
         "1" ++
-        "-----------------------------389538318911445707002572116565--\r\n"
-    ;
+        "-----------------------------389538318911445707002572116565--\r\n";
     var form = Form.init(std.testing.allocator);
     defer form.deinit();
     try form.parseMultipart(content_type, body);
@@ -188,8 +179,7 @@ test "simple-file-form" {
         "Content-Disposition: form-data; name=files; filename=ab.txt\r\n" ++
         "\r\n" ++
         "Hello!\n" ++
-        "--1234--\r\n"
-    ;
+        "--1234--\r\n";
     var form = Form.init(std.testing.allocator);
     defer form.deinit();
     try form.parseMultipart(content_type, body);
@@ -209,8 +199,7 @@ test "multi-file-form" {
         "Content-Disposition: form-data; name=files; filename=data.json; content-type=application/json\r\n" ++
         "\r\n" ++
         "{\"status\": \"OK\"}\n" ++
-        "--1234--\r\n"
-    ;
+        "--1234--\r\n";
     var form = Form.init(std.testing.allocator);
     defer form.deinit();
     try form.parseMultipart(content_type, body);
@@ -221,7 +210,6 @@ test "multi-file-form" {
     try testing.expectEqualStrings(f.items[1].filename, "data.json");
     try testing.expectEqualStrings(f.items[1].content_type, "application/json");
 }
-
 
 // Parse a header.
 // return the first value and update the params with everything else
@@ -239,7 +227,7 @@ fn parseHeader(allocator: Allocator, line: []const u8, params: *Headers) ![]cons
         if (i == null) continue;
 
         const name = mem.trim(u8, p[0..i.?], " \r\n");
-        const encoded_value = mem.trim(u8, p[i.?+1..], " \r\n");
+        const encoded_value = mem.trim(u8, p[i.? + 1 ..], " \r\n");
         const decoded_value = try collapseRfc2231Value(allocator, encoded_value);
         try params.append(name, decoded_value);
     }
@@ -290,14 +278,11 @@ pub fn encodeHeader(allocator: Allocator, key: []const u8, params: Headers) ![]c
             try out.append(entry.key);
         } else {
             // TODO: quote if necessary.
-            try out.append(
-                try std.fmt.allocPrint(&arena.allocator,
-                    "{}={}", .{entry.key, entry.value}));
+            try out.append(try std.fmt.allocPrint(&arena.allocator, "{}={}", .{ entry.key, entry.value }));
         }
     }
     return try mem.join(allocator, "; ", out.items);
 }
-
 
 test "encode-header" {
     const allocator = std.testing.allocator;
@@ -312,10 +297,6 @@ test "encode-header" {
     try params.append("client_max_window_bits", "15");
 
     r = try encodeHeader(allocator, "permessage-deflate", params);
-    try testing.expectEqualSlices(u8, r,
-        "permessage-deflate; client_no_context_takeover; client_max_window_bits=15");
+    try testing.expectEqualSlices(u8, r, "permessage-deflate; client_no_context_takeover; client_max_window_bits=15");
     allocator.free(r);
-
 }
-
-

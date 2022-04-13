@@ -1525,7 +1525,7 @@ test "datetime-subtract" {
 
      b = try Datetime.create(2019, 12, 2, 11, 0, 0, 466545, null);
      delta = a.sub(b);
-     try testing.expectEqual(delta.totalSeconds(), 13 + 51* time.s_per_min);
+     try testing.expectEqual(delta.totalSeconds(), 13 + 51 * time.s_per_min);
 }
 
 test "datetime-parse-modified-since" {

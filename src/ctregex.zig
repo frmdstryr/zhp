@@ -194,7 +194,7 @@ const RegexParser = struct {
         const line_suffix = if (end_idx == parser.iterator.bytes.len) "\n" else " [...]\n";
 
         const ArgTuple = struct {
-            tuple: anytype= .{},
+            tuple: ?*const anyopaque = .{},
         };
         var arg_list = ArgTuple{};
         for (args) |arg| {

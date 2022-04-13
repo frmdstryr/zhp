@@ -30,7 +30,6 @@ pub const Opcode = enum(u4) {
     pub fn isControl(opcode: Opcode) bool {
         return @enumToInt(opcode) & 0x8 != 0;
     }
-
 };
 
 pub const WebsocketHeader = packed struct {
@@ -46,7 +45,7 @@ pub const WebsocketHeader = packed struct {
         return switch (length) {
             0...126 => @truncate(u7, length),
             127...0xFFFF => 126,
-            else => 127
+            else => 127,
         };
     }
 };
@@ -71,7 +70,7 @@ pub const WebsocketDataFrame = struct {
         const expected = switch (dataframe.data.len) {
             0...126 => dataframe.data.len,
             127...0xFFFF => 126,
-            else => 127
+            else => 127,
         };
         return dataframe.header.len == expected;
     }
@@ -87,7 +86,6 @@ pub fn Writer(comptime size: usize, comptime opcode: Opcode) type {
     };
     return std.io.BufferedWriter(size, WriterType);
 }
-
 
 pub const Websocket = struct {
     pub const WriteError = error{
@@ -110,12 +108,12 @@ pub const Websocket = struct {
     // A buffered writer that will buffer up to size bytes before writing out
     pub fn writer(self: *Websocket, comptime size: usize, comptime opcode: Opcode) Writer(size, opcode) {
         const BufferedWriter = Writer(size, opcode);
-        const frame_writer = switch(opcode) {
-            .Text => TextFrameWriter{.context=self},
-            .Binary => BinaryFrameWriter{.context=self},
+        const frame_writer = switch (opcode) {
+            .Text => TextFrameWriter{ .context = self },
+            .Binary => BinaryFrameWriter{ .context = self },
             else => @compileError("Unsupported writer type"),
         };
-        return BufferedWriter{.unbuffered_writer=frame_writer};
+        return BufferedWriter{ .unbuffered_writer = frame_writer };
     }
 
     // Close and send the status
@@ -284,6 +282,4 @@ pub const Websocket = struct {
             .data = data,
         };
     }
-
 };
-

@@ -14,7 +14,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-
 const web = @import("zhp.zig");
 const util = @import("util.zig");
 
@@ -28,19 +27,16 @@ const handlers = web.handlers;
 const root = @import("root");
 const regex = @import("ctregex.zig");
 
-
 // A handler is simply a a factory function which returns a RequestHandler
 pub const Handler = if (std.io.is_async)
-        fn(app: *Application, server_request: *ServerRequest) callconv(.Async) anyerror!void
-    else
-        fn(app: *Application, server_request: *ServerRequest) anyerror!void;
-
+    fn (app: *Application, server_request: *ServerRequest) callconv(.Async) anyerror!void
+else
+    fn (app: *Application, server_request: *ServerRequest) anyerror!void;
 
 // A utility function so the user doesn't have to use @fieldParentPtr all the time
 // This seems a bit excessive...
 pub fn createHandler(comptime T: type) Handler {
     const RequestHandler = struct {
-
         pub fn execute(app: *Application, server_request: *ServerRequest) anyerror!void {
             _ = app;
             const request = &server_request.request;
@@ -52,9 +48,7 @@ pub fn createHandler(comptime T: type) Handler {
 
                     // Create the request handler
                     if (@hasField(T, "server_request")) {
-                        self.* = T{
-                            .server_request = server_request
-                        };
+                        self.* = T{ .server_request = server_request };
                     } else {
                         self.* = T{};
                     }
@@ -91,22 +85,16 @@ pub fn createHandler(comptime T: type) Handler {
                         }
                         return error.ServerError; // Something is missing here...
                     }
-                }
-
+                },
             }
-
         }
     };
 
     return RequestHandler.execute;
 }
 
-
 pub const ServerRequest = struct {
-    pub const State = enum {
-        Start,
-        Finish
-    };
+    pub const State = enum { Start, Finish };
     allocator: Allocator,
     application: *Application,
 
@@ -130,17 +118,9 @@ pub const ServerRequest = struct {
         return ServerRequest{
             .allocator = allocator,
             .application = app,
-            .storage = try allocator.alloc(
-                u8, app.options.handler_buffer_size),
-            .request = try Request.initCapacity(
-                allocator,
-                app.options.request_buffer_size,
-                app.options.max_header_count,
-                app.options.max_cookie_count),
-            .response = try Response.initCapacity(
-                allocator,
-                app.options.response_buffer_size,
-                app.options.response_header_count),
+            .storage = try allocator.alloc(u8, app.options.handler_buffer_size),
+            .request = try Request.initCapacity(allocator, app.options.request_buffer_size, app.options.max_header_count, app.options.max_cookie_count),
+            .response = try Response.initCapacity(allocator, app.options.response_buffer_size, app.options.response_header_count),
         };
     }
 
@@ -179,8 +159,6 @@ pub const ServerRequest = struct {
         self.response.deinit();
         self.allocator.free(self.storage);
     }
-
-
 };
 
 // A single client connection
@@ -205,8 +183,7 @@ pub const ServerConnection = struct {
     }
 
     // Handles a connection
-    pub fn startRequestLoop(self: *ServerConnection,
-                            conn: net.StreamServer.Connection) !void {
+    pub fn startRequestLoop(self: *ServerConnection, conn: net.StreamServer.Connection) !void {
         defer self.release();
         self.requestLoop(conn) catch |err| {
             log.err("unexpected error: {s}", .{@errorName(err)});
@@ -261,23 +238,21 @@ pub const ServerConnection = struct {
 
             // Parse the request line and headers
             request.parse(&self.io, options) catch |err| switch (err) {
-                error.ConnectionResetByPeer,
-                error.BrokenPipe,
-                error.EndOfStream => return, // Ignore
+                error.ConnectionResetByPeer, error.BrokenPipe, error.EndOfStream => return, // Ignore
                 else => {
                     server_request.err = err;
 
-//                     if (params.debug) {
-//                         if (@errorReturnTrace()) |trace| {
-//                             try std.debug.writeStackTrace(
-//                                 trace.*,
-//                                 &std.io.getStdErr().writer(),
-//                                 response.allocator,
-//                                 try std.debug.getSelfDebugInfo(),
-//                                 std.debug.detectTTYConfig());
-//                         }
-//                     }
-                }
+                    //                     if (params.debug) {
+                    //                         if (@errorReturnTrace()) |trace| {
+                    //                             try std.debug.writeStackTrace(
+                    //                                 trace.*,
+                    //                                 &std.io.getStdErr().writer(),
+                    //                                 response.allocator,
+                    //                                 try std.debug.getSelfDebugInfo(),
+                    //                                 std.debug.detectTTYConfig());
+                    //                         }
+                    //                     }
+                },
             };
 
             // Get the function used to build the handler for the request
@@ -311,22 +286,19 @@ pub const ServerConnection = struct {
                 try app.error_handler(server_request);
 
                 switch (err) {
-                    error.BrokenPipe,
-                    error.EndOfStream,
-                    error.ConnectionResetByPeer,
-                    error.NotOpenForReading => {
+                    error.BrokenPipe, error.EndOfStream, error.ConnectionResetByPeer, error.NotOpenForReading => {
                         self.io.closed = true; // Make sure no response is sent
 
                         // Only log if it was a partial request
                         if (request.method != .Unknown) {
-                            log.warn("connection error: {} {}", .{err, self.address});
+                            log.warn("connection error: {} {}", .{ err, self.address });
                         }
                     },
                     else => {
                         if (self.application.options.debug) {
-                            log.warn("server error: {} {}", .{err, request});
+                            log.warn("server error: {} {}", .{ err, request });
                         } else {
-                            log.warn("server error: {} {}", .{err, self.address});
+                            log.warn("server error: {} {}", .{ err, self.address });
                         }
                     },
                 }
@@ -350,9 +322,7 @@ pub const ServerConnection = struct {
         const headers = &request.headers;
         if (request.version == .Http1_1) {
             return !headers.eqlIgnoreCase("Connection", "close");
-        } else if (headers.contains("Content-Length")
-                    or headers.eqlIgnoreCase("Transfer-Encoding", "chunked")
-                    or request.method == .Head or request.method == .Get){
+        } else if (headers.contains("Content-Length") or headers.eqlIgnoreCase("Transfer-Encoding", "chunked") or request.method == .Head or request.method == .Get) {
             return headers.eqlIgnoreCase("Connection", "keep-alive");
         }
         return false;
@@ -366,14 +336,11 @@ pub const ServerConnection = struct {
         const content_length = response.body.items.len;
 
         // Write status line
-        try stream.print("HTTP/1.1 {d} {s}\r\n", .{
-            response.status.code,
-            response.status.phrase
-        });
+        try stream.print("HTTP/1.1 {d} {s}\r\n", .{ response.status.code, response.status.phrase });
 
         // Write headers
         for (response.headers.headers.items) |header| {
-            try stream.print("{s}: {s}\r\n", .{header.key, header.value});
+            try stream.print("{s}: {s}\r\n", .{ header.key, header.value });
         }
 
         // Set default content type
@@ -392,12 +359,12 @@ pub const ServerConnection = struct {
         server_request.state = .Finish;
 
         // Write body
-//         if (response.chunking_output) {
-//             var start = 0;
-//             TODO
-//
-//             try stream.write("0\r\n\r\n");
-//         }
+        //         if (response.chunking_output) {
+        //             var start = 0;
+        //             TODO
+        //
+        //             try stream.write("0\r\n\r\n");
+        //         }
         var total_wrote: usize = 0;
         if (response.send_stream) {
             try self.application.execute(server_request);
@@ -412,8 +379,7 @@ pub const ServerConnection = struct {
         // Make sure the content-length was correct otherwise the client
         // will hang waiting
         if (!response.send_stream and total_wrote != content_length) {
-            log.warn("Response content-length is invalid: {} != {}",
-                .{total_wrote, content_length});
+            log.warn("Response content-length is invalid: {} != {}", .{ total_wrote, content_length });
             return error.ServerError;
         }
 
@@ -442,9 +408,7 @@ pub const ServerConnection = struct {
         allocator.destroy(self.frame);
         self.io.deinit();
     }
-
 };
-
 
 pub const Route = struct {
     name: []const u8, // Reverse url name
@@ -458,30 +422,24 @@ pub const Route = struct {
         if (path[0] != '/') {
             @compileError("Route url path must start with /");
         }
-        return Route{
-            .name=name,
-            .pattern=path,
-            .handler=createHandler(T)
-        };
+        return Route{ .name = name, .pattern = path, .handler = createHandler(T) };
     }
 
     pub fn static(comptime name: []const u8, comptime path: []const u8, comptime file_path: []const u8) Route {
-        if (path.len < 2 or path[0] != '/' or path[path.len-1] != '/') {
+        if (path.len < 2 or path[0] != '/' or path[path.len - 1] != '/') {
             @compileError("Route url path must start and end with /");
         }
         return Route{
-            .name=name,
-            .pattern=path++".*",
-            .handler=createHandler(handlers.StaticFileHandler(path, file_path)),
+            .name = name,
+            .pattern = path ++ ".*",
+            .handler = createHandler(handlers.StaticFileHandler(path, file_path)),
         };
     }
 
     pub fn websocket(comptime name: []const u8, comptime path: []const u8, comptime T: type) Route {
         return create(name, path, handlers.WebsocketHandler(T));
     }
-
 };
-
 
 pub const Clock = struct {
     buffer: [32]u8 = undefined,
@@ -500,25 +458,21 @@ pub const Clock = struct {
         if (t - self.last_updated > 1000) {
             var lock = self.lock.acquire();
             defer lock.release();
-            self.value = Datetime.formatHttpFromTimestamp(
-                &self.buffer, t) catch unreachable;
+            self.value = Datetime.formatHttpFromTimestamp(&self.buffer, t) catch unreachable;
             self.last_updated = t;
         }
     }
-
 };
-
 
 const default_route = [_]Route{
     Route.create("index", "/", handlers.IndexHandler),
 };
 
-
 pub const Middleware = struct {
-    init: ?fn(app: *Application) anyerror!void = null,
+    init: ?fn (app: *Application) anyerror!void = null,
     processRequest: ?Handler = null,
     processResponse: ?Handler = null,
-    deinit: ?fn(app: *Application) void = null,
+    deinit: ?fn (app: *Application) void = null,
 
     pub fn create(comptime T: type) Middleware {
         return Middleware{
@@ -528,13 +482,11 @@ pub const Middleware = struct {
             .deinit = if (@hasDecl(T, "deinit")) T.deinit else null,
         };
     }
-
 };
 
 const default_middleware = [_]Middleware{};
 
 pub const Application = struct {
-
     pub const ConnectionPool = util.ObjectPool(ServerConnection);
     pub const RequestPool = util.ObjectPool(ServerRequest);
 
@@ -549,13 +501,13 @@ pub const Application = struct {
         max_cookie_count: usize = 32,
 
         // If headers are longer than this return a request headers too large error
-        max_request_headers_size: u32 = 10*1024,
+        max_request_headers_size: u32 = 10 * 1024,
 
         /// Size of request buffer
         request_buffer_size: u32 = 65536,
 
         // Fixed memory buffer size for request handlers to allocate in
-        handler_buffer_size: u32 = 5*1024,
+        handler_buffer_size: u32 = 5 * 1024,
 
         // If request line is longer than this return a request uri too long error
         max_request_line_size: u32 = 4096,
@@ -565,7 +517,7 @@ pub const Application = struct {
 
         // If the content length is over the request buffer size
         // it will spool to a temp file on disk up to this size
-        max_content_length: u64 = 50*1024*1024, // 50 MB
+        max_content_length: u64 = 50 * 1024 * 1024, // 50 MB
 
         /// Size of response buffer
         response_buffer_size: u32 = 65536,
@@ -574,8 +526,8 @@ pub const Application = struct {
         response_header_count: u8 = 12,
 
         // Timeout in millis
-        idle_connection_timeout: u32 = 300 * time.ms_per_s,  // 5 min
-        header_timeout: u32 = 300 * time.ms_per_s,  // 5 min
+        idle_connection_timeout: u32 = 300 * time.ms_per_s, // 5 min
+        header_timeout: u32 = 300 * time.ms_per_s, // 5 min
         body_timeout: u32 = 900 * time.ms_per_s, // 15 min
 
         // Set tcp TCP_NODELAY
@@ -595,20 +547,27 @@ pub const Application = struct {
         debug: bool = false,
     };
 
-
     // ------------------------------------------------------------------------
     // Server Config
     // ------------------------------------------------------------------------
     pub const routes: []const Route = if (@hasDecl(root, "routes"))
-        root.routes[0..] else default_route[0..];
+        root.routes[0..]
+    else
+        default_route[0..];
 
     pub const middleware: []const Middleware = if (@hasDecl(root, "middleware"))
-        root.middleware[0..] else default_middleware[0..];
+        root.middleware[0..]
+    else
+        default_middleware[0..];
 
     pub const error_handler = createHandler(if (@hasDecl(root, "error_handler"))
-        root.error_handler else handlers.ServerErrorHandler);
+        root.error_handler
+    else
+        handlers.ServerErrorHandler);
     pub const not_found_handler = createHandler(if (@hasDecl(root, "not_found_handler"))
-        root.not_found_handler else handlers.NotFoundHandler);
+        root.not_found_handler
+    else
+        handlers.NotFoundHandler);
 
     pub var instance: ?*Application = null;
 
@@ -626,7 +585,10 @@ pub const Application = struct {
     // ------------------------------------------------------------------------
     // Setup
     // ------------------------------------------------------------------------
-    pub fn init(allocator: Allocator, options: Options,) Application {
+    pub fn init(
+        allocator: Allocator,
+        options: Options,
+    ) Application {
         mimetypes.instance = mimetypes.Registry.init(allocator);
         return Application{
             .allocator = allocator,
@@ -649,7 +611,7 @@ pub const Application = struct {
                 &std.mem.toBytes(@as(c_int, 1)),
             );
         }
-        log.info("Listening on http://{s}:{d}", .{address, port});
+        log.info("Listening on http://{s}:{d}", .{ address, port });
     }
 
     // Start serving requests For each incoming connection.
@@ -660,11 +622,11 @@ pub const Application = struct {
 
         // Ignore sigpipe
         var act = os.Sigaction{
-            .handler = .{.sigaction = os.SIG.IGN },
+            .handler = .{ .sigaction = os.SIG.IGN },
             .mask = os.empty_sigset,
             .flags = 0,
         };
-        os.sigaction(os.SIG.PIPE, &act, null);
+        try os.sigaction(os.SIG.PIPE, &act, null);
 
         Application.instance = self;
         self.running = true;
@@ -707,7 +669,6 @@ pub const Application = struct {
                 try server_conn.startRequestLoop(conn);
             }
         }
-
     }
 
     // ------------------------------------------------------------------------
@@ -733,7 +694,7 @@ pub const Application = struct {
         @setEvalBranchQuota(50000);
         const path = server_request.request.path;
         inline for (routes) |*route| {
-            if (try regex.match(route.pattern, .{.encoding=.ascii}, path)) |*match| {
+            if (try regex.match(route.pattern, .{ .encoding = .ascii }, path)) |*match| {
                 //std.log.warn("Route: name={s} path={s}\n", .{route.name, request.path});
                 if (match.captures.len > 0) {
                     server_request.request.args = match.captures[0..];
@@ -768,7 +729,7 @@ pub const Application = struct {
     // Periodically go through the pools and cleanup
     pub fn backgroundLoop(self: *Application) void {
         while (self.running) {
-            time.sleep(1*time.ns_per_s);
+            time.sleep(1 * time.ns_per_s);
             self.clock.update();
             {
                 const lock = self.connection_pool.acquire();
@@ -816,7 +777,6 @@ pub const Application = struct {
         self.connection_pool.deinit();
         self.request_pool.deinit();
     }
-
 };
 
 test "app" {
