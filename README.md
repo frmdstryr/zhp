@@ -1,6 +1,6 @@
 # ZHP
 
-[![Build Status](https://travis-ci.org/frmdstryr/zhp.svg?branch=master)](https://travis-ci.org/frmdstryr/zhp)
+[![status](https://github.com/frmdstryr/zhp/actions/workflows/ci.yml/badge.svg)](https://github.com/frmdstryr/zhp/actions)
 
 A (work in progress) Http server written in [Zig](https://ziglang.org/).
 

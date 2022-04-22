@@ -1,0 +1,18 @@
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+            sudo snap install zig --classic --edge
+            sudo docker pull williamyeh/wrk
+            zig version
+      - name: Module test
+        run: zig test -OReleaseSafe src/app.zig
+      - name: Parser test
+        run: zig run --pkg-begin zhp src/zhp.zig --pkg-end -OReleaseSafe tests/parser.zig
+      - name: Build
+        run: zig build -Drelease-safe=true install
